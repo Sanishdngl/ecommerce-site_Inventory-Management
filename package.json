@@ -1,0 +1,23 @@
+{
+  "name": "ecommerce-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "gateway",
+    "services/*",
+    "shared"
+  ],
+  "scripts": {
+    "dev:gateway": "npm run dev --workspace=gateway",
+    "dev:admin": "npm run dev --workspace=services/admin-service",
+    "dev:inventory": "npm run dev --workspace=services/inventory-service",
+    "dev:customer": "npm run dev --workspace=services/customer-service",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}
