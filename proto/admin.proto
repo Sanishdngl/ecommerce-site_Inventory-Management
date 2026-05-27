@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package admin;
+
+import "common.proto";
+
+// Enum
+
+enum AdminRole {
+  ADMIN_ROLE_UNSPECIFIED = 0;
+  SUPER_ADMIN            = 1;
+  MAINTAINER             = 2;
+  REPORTER               = 3;
+}
+
+// Domain object
+
+message AdminUser {
+  string    id         = 1;
+  string    username   = 2;
+  string    email      = 3;
+  AdminRole role       = 4;
+  bool      is_active  = 5;
+  string    created_at = 6;
+  string    updated_at = 7;
+}
+
+// Requests
+// requester identity travels in gRPC call metadata, not in message fields
+
+message LoginAdminRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message CreateAdminRequest {
+  string    username = 1;
+  string    email    = 2;
+  string    password = 3;
+  AdminRole role     = 4;
+}
+
+message UpdateAdminRequest {
+  string           id       = 1;
+  optional string  username = 2;
+  optional string  email    = 3;
+  optional AdminRole role   = 4;
+}
+
+message DeleteAdminRequest {
+  string id = 1;
+}
+
+message ToggleStatusRequest {
+  string id = 1;
+}
+
+message ListAdminRequest {
+  common.PaginationRequest pagination = 1;
+}
+
+// Responses
+
+// Returns user data only; Gateway signs and returns the JWT
+message LoginAdminResponse {
+  AdminUser user = 1;
+}
+
+message AdminUserResponse {
+  AdminUser user = 1;
+}
+
+message AdminUserListResponse {
+  repeated AdminUser       users      = 1;
+  common.PaginationMeta    pagination = 2;
+}
+
+// Service
+
+service AdminService {
+  rpc LoginAdmin       (LoginAdminRequest)  returns (LoginAdminResponse);
+  rpc CreateAdminUser  (CreateAdminRequest) returns (AdminUserResponse);
+  rpc UpdateAdminUser  (UpdateAdminRequest) returns (AdminUserResponse);
+  rpc DeleteAdminUser  (DeleteAdminRequest) returns (common.StatusResponse);
+  rpc ToggleAdminStatus(ToggleStatusRequest) returns (common.StatusResponse);
+  rpc ListAdminUsers   (ListAdminRequest)   returns (AdminUserListResponse);
+}
