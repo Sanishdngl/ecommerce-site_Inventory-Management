@@ -19,5 +19,12 @@
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "@grpc/proto-loader": "^0.8.1",
+    "@types/node": "^25.9.1"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.4"
   }
 }

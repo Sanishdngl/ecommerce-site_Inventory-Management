@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package customer;
+
+import "common.proto";
+
+// Customer 
+
+message CustomerUser {
+  string          id             = 1;
+  string          email          = 2;
+  string          first_name     = 3;
+  string          last_name      = 4;
+  optional string oauth_provider = 5;
+  bool            is_active      = 6;
+  string          created_at     = 7;
+  string          updated_at     = 8;
+}
+
+message RegisterRequest {
+  string email      = 1;
+  string password   = 2;
+  string first_name = 3;
+  string last_name  = 4;
+}
+
+message LoginRequest {
+  string email    = 1;
+  string password = 2;
+}
+
+message OAuthRequest {
+  string provider = 1;   // e.g. "google"; must match configured provider in env
+  string token    = 2;   // OAuth id_token or access token from provider
+}
+
+// Returns customer data only; Gateway signs the JWT
+message AuthResponse {
+  CustomerUser customer = 1;
+}
+
+message ProfileRequest {
+  string customer_id = 1;
+}
+
+message UpdateProfileRequest {
+  string          customer_id = 1;
+  optional string first_name  = 2;
+  optional string last_name   = 3;
+  // email change is out of scope Phase 1
+}
+
+message CustomerResponse {
+  CustomerUser customer = 1;
+}
+
+// Cart
+
+message CartItemRequest {
+  string customer_id = 1;
+  string product_id  = 2;
+  int32  quantity    = 3;   // must be > 0; use RemoveFromCart for zero
+}
+
+message RemoveCartRequest {
+  string customer_id = 1;
+  string product_id  = 2;
+}
+
+message GetCartRequest {
+  string customer_id = 1;
+}
+
+message CartItem {
+  string product_id    = 1;
+  string product_name  = 2;
+  string price         = 3;   // string; matches inventory price format
+  string thumbnail_url = 4;
+  int32  quantity      = 5;
+  int32  stock_quantity = 6;  // hydrated from Inventory Service for front-end cap
+}
+
+message CartResponse {
+  repeated CartItem items = 1;
+}
+
+// Service
+
+service CustomerService {
+  rpc RegisterCustomer(RegisterRequest)       returns (CustomerResponse);
+  rpc LoginCustomer   (LoginRequest)          returns (AuthResponse);
+  rpc OAuthLogin      (OAuthRequest)          returns (AuthResponse);
+
+  rpc GetProfile      (ProfileRequest)        returns (CustomerResponse);
+  rpc UpdateProfile   (UpdateProfileRequest)  returns (CustomerResponse);
+
+  rpc AddToCart       (CartItemRequest)       returns (CartResponse);
+  rpc UpdateCartItem  (CartItemRequest)       returns (CartResponse);
+  rpc RemoveFromCart  (RemoveCartRequest)     returns (CartResponse);
+  rpc GetCart         (GetCartRequest)        returns (CartResponse);
+}
