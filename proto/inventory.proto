@@ -1,0 +1,164 @@
+syntax = "proto3";
+
+package inventory;
+
+import "common.proto";
+
+// Category
+
+message Category {
+  string id         = 1;
+  string name       = 2;
+  string slug       = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+
+message CreateCategoryRequest {
+  string name = 1;
+  string slug = 2;
+}
+
+message ListCategoriesRequest {}   // no filter; returns full list
+
+message CategoryResponse {
+  Category category = 1;
+}
+
+message CategoryListResponse {
+  repeated Category categories = 1;
+}
+
+// Product 
+
+message Product {
+  string id             = 1;
+  string category_id    = 2;
+  string name           = 3;
+  string description    = 4;
+  string price          = 5;   // string preserves DECIMAL(10,2) precision
+  int32  stock_quantity = 6;
+  string thumbnail_url  = 7;
+  string list_image_url = 8;
+  bool   is_active      = 9;
+  string created_at     = 10;
+  string updated_at     = 11;
+}
+
+message CreateProductRequest {
+  string category_id    = 1;
+  string name           = 2;
+  string description    = 3;
+  string price          = 4;
+  int32  stock_quantity = 5;
+}
+
+message UpdateProductRequest {
+  string          id          = 1;
+  optional string category_id = 2;
+  optional string name        = 3;
+  optional string description = 4;
+  optional string price       = 5;
+  optional bool   is_active   = 6;
+}
+
+message DeleteProductRequest {
+  string id = 1;
+}
+
+message GetProductRequest {
+  string id = 1;
+}
+
+message ListProductsRequest {
+  optional string          category_id = 1;   // omit to list all
+  common.PaginationRequest pagination  = 2;
+}
+
+message ProductResponse {
+  Product product = 1;
+}
+
+message ProductListResponse {
+  repeated Product      products   = 1;
+  common.PaginationMeta pagination = 2;
+}
+
+// Stock 
+
+message UpdateStockRequest {
+  string product_id = 1;
+  int32  delta      = 2;   // positive = add, negative = subtract; service rejects if result < 0
+}
+
+message StockResponse {
+  string product_id    = 1;
+  int32  stock_quantity = 2;
+}
+
+// Single image upload 
+// Client-streaming: first message must be meta, followed by one or more data chunks.
+
+message ProductImageChunk {
+  oneof payload {
+    ProductImageMeta meta  = 1;
+    bytes            chunk = 2;
+  }
+}
+
+message ProductImageMeta {
+  string product_id  = 1;
+  string image_type  = 2;   // "thumbnail" | "list_image"
+  string mime_type   = 3;
+}
+
+message ProductImageUploadResponse {
+  string url = 1;
+}
+
+// Bulk upload 
+// Stream protocol: first message carries the full Excel file bytes,
+// subsequent messages carry image files keyed by filename.
+
+message BulkUploadChunk {
+  oneof payload {
+    bytes         excel_data = 1;   // complete .xlsx buffer; sent as one message
+    BulkImageFile image      = 2;   // one message per image file
+  }
+}
+
+message BulkImageFile {
+  string filename  = 1;
+  bytes  data      = 2;
+  string mime_type = 3;
+}
+
+message BulkUploadError {
+  int32  row     = 1;
+  string message = 2;
+}
+
+message BulkUploadResponse {
+  int32                    total   = 1;
+  int32                    success = 2;
+  int32                    failed  = 3;
+  repeated BulkUploadError errors  = 4;
+}
+
+// Service
+
+service InventoryService {
+  rpc CreateCategory   (CreateCategoryRequest)          returns (CategoryResponse);
+  rpc ListCategories   (ListCategoriesRequest)          returns (CategoryListResponse);
+
+  rpc CreateProduct    (CreateProductRequest)           returns (ProductResponse);
+  rpc UpdateProduct    (UpdateProductRequest)           returns (ProductResponse);
+  rpc DeleteProduct    (DeleteProductRequest)           returns (common.StatusResponse);
+  rpc GetProduct       (GetProductRequest)              returns (ProductResponse);
+  rpc ListProducts     (ListProductsRequest)            returns (ProductListResponse);
+
+  rpc UpdateStock      (UpdateStockRequest)             returns (StockResponse);
+
+  rpc UploadProductImage  (stream ProductImageChunk)   returns (ProductImageUploadResponse);
+  rpc BulkUploadProducts  (stream BulkUploadChunk)     returns (BulkUploadResponse);
+}
