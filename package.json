@@ -1,0 +1,48 @@
+{
+  "name": "ecommerce-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "gateway",
+    "services/*",
+    "shared"
+  ],
+  "scripts": {
+    "dev:gateway": "npm run dev --workspace=gateway",
+    "dev:admin": "npm run dev --workspace=services/admin-service",
+    "dev:inventory": "npm run dev --workspace=services/inventory-service",
+    "dev:customer": "npm run dev --workspace=services/customer-service",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "migrate:latest": "knex --knexfile knexfile.ts migrate:latest",
+    "migrate:rollback": "knex --knexfile knexfile.ts migrate:rollback",
+    "migrate:status": "knex --knexfile knexfile.ts migrate:status",
+    "seed:run": "knex --knexfile knexfile.ts seed:run",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "@grpc/proto-loader": "^0.8.1",
+    "@types/bcrypt": "^6.0.0",
+    "@types/ioredis": "^4.28.10",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/knex": "^0.15.2",
+    "@types/node": "^25.9.1",
+    "@types/uuid": "^10.0.0",
+    "ts-node": "^10.9.2"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "bcrypt": "^6.0.0",
+    "brcypt": "^1.0.1",
+    "dotenv": "^17.4.2",
+    "ioredis": "^5.11.0",
+    "jsonwebtoken": "^9.0.3",
+    "knex": "^3.2.10",
+    "mysql2": "^3.22.4",
+    "uuid": "^14.0.0"
+  }
+}
