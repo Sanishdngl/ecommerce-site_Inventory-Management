@@ -1,6 +1,5 @@
 import * as jwt from "jsonwebtoken";
 import type { AdminJWTPayload, CustomerJWTPayload } from "./types";
-import * as bcrypt from "bcrypt";
 
 function getPrivateKey(): string {
   const key = process.env.JWT_PRIVATE_KEY;
@@ -42,17 +41,4 @@ export function verifyCustomerJWT(token: string): CustomerJWTPayload {
   return jwt.verify(token, getPublicKey(), {
     algorithms: ["RS256"],
   }) as CustomerJWTPayload;
-}
-
-const SALT_ROUNDS = 12;
-
-export async function hashPassword(plain: string): Promise<string> {
-  return bcrypt.hash(plain, SALT_ROUNDS);
-}
-
-export async function verifyPassword(
-  plain: string,
-  hash: string
-): Promise<boolean> {
-  return bcrypt.compare(plain, hash);
 }
