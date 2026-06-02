@@ -10,6 +10,7 @@ import {
   updateStock,
   uploadProductImageHandler,
 } from "../handlers/product.handlers";
+import { bulkUploadProductsHandler } from "../handlers/bulk.handlers";
 
 export function createServer(): grpc.Server {
   const server = new grpc.Server();
@@ -26,7 +27,7 @@ export function createServer(): grpc.Server {
     ListProducts: listProducts,
     UpdateStock: updateStock,
     UploadProductImage: uploadProductImageHandler,
-    BulkUploadProducts: () => {},
+    BulkUploadProducts: bulkUploadProductsHandler,
   });
 
   return server;

@@ -18,6 +18,29 @@ export function callGrpc<Req, Res>(
   });
 }
 
+export function streamToGrpc<Res>(
+  client: any,
+  method: string,
+  messages: any[],
+  meta?: grpc.Metadata
+): Promise<Res> {
+  return new Promise((resolve, reject) => {
+    const call = client[method](
+      meta ?? new grpc.Metadata(),
+      (err: grpc.ServiceError | null, response: Res) => {
+        if (err) reject(err);
+        else resolve(response);
+      }
+    );
+
+    for (const message of messages) {
+      call.write(message);
+    }
+
+    call.end();
+  });
+}
+
 export function buildMeta(adminId?: string, ip?: string): grpc.Metadata {
   const meta = new grpc.Metadata();
   if (adminId) meta.set("admin_id", adminId);
