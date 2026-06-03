@@ -12,6 +12,11 @@
     "dev:admin": "npm run dev --workspace=services/admin-service",
     "dev:inventory": "npm run dev --workspace=services/inventory-service",
     "dev:customer": "npm run dev --workspace=services/customer-service",
+    "build": "npm run build --workspaces",
+    "start:gateway": "npm start --workspace=gateway",
+    "start:admin": "npm start --workspace=services/admin-service",
+    "start:customer": "npm start --workspace=services/customer-service",
+    "start:inventory": "npm start --workspace=services/inventory-service",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "migrate:latest": "knex --knexfile knexfile.ts migrate:latest",
     "migrate:rollback": "knex --knexfile knexfile.ts migrate:rollback",
@@ -25,17 +30,17 @@
     "npm": ">=10.0.0"
   },
   "devDependencies": {
-    "@grpc/proto-loader": "^0.8.1",
     "@types/bcrypt": "^6.0.0",
     "@types/ioredis": "^4.28.10",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/knex": "^0.15.2",
     "@types/node": "^25.9.1",
     "@types/uuid": "^10.0.0",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
     "bcrypt": "^6.0.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
