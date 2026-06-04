@@ -3,6 +3,7 @@ syntax = "proto3";
 package admin;
 
 import "common.proto";
+import "inventory.proto";
 
 // Enum
 
@@ -78,10 +79,22 @@ message AdminUserListResponse {
 // Service
 
 service AdminService {
+  //AdminService
   rpc LoginAdmin       (LoginAdminRequest)  returns (LoginAdminResponse);
   rpc CreateAdminUser  (CreateAdminRequest) returns (AdminUserResponse);
   rpc UpdateAdminUser  (UpdateAdminRequest) returns (AdminUserResponse);
   rpc DeleteAdminUser  (DeleteAdminRequest) returns (common.StatusResponse);
   rpc ToggleAdminStatus(ToggleStatusRequest) returns (common.StatusResponse);
   rpc ListAdminUsers   (ListAdminRequest)   returns (AdminUserListResponse);
+
+  //InventoryService
+  rpc CreateCategory     (inventory.CreateCategoryRequest)      returns (inventory.CategoryResponse);
+  rpc CreateProduct      (inventory.CreateProductRequest)       returns (inventory.ProductResponse);
+  rpc UpdateProduct      (inventory.UpdateProductRequest)       returns (inventory.ProductResponse);
+  rpc DeleteProduct      (inventory.DeleteProductRequest)       returns (common.StatusResponse);
+  rpc GetProduct         (inventory.GetProductRequest)          returns (inventory.ProductResponse);
+  rpc ListProducts       (inventory.ListProductsRequest)        returns (inventory.ProductListResponse);
+  rpc UpdateStock        (inventory.UpdateStockRequest)         returns (inventory.StockResponse);
+  rpc UploadProductImage (stream inventory.ProductImageChunk)   returns (inventory.ProductImageUploadResponse);
+  rpc BulkUploadProducts (stream inventory.BulkUploadChunk)     returns (inventory.BulkUploadResponse);
 }
