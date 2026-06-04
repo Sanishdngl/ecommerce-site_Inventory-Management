@@ -1,8 +1,6 @@
 services:
   mysql:
     image: mysql:8
-    container_name: ecommerce_mysql
-    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME}
@@ -13,15 +11,25 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-p${DB_ROOT_PASSWORD}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - ecommerce
 
   redis:
     image: redis:7-alpine
-    container_name: ecommerce_redis
-    restart: unless-stopped
     ports:
       - "6379:6379"
     healthcheck:
@@ -29,19 +37,127 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - ecommerce
 
   rustfs:
     image: rustfs/rustfs:latest
-    container_name: ecommerce_rustfs
-    restart: unless-stopped
+    environment:
+      RUSTFS_ROOT_USER: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_ROOT_PASSWORD: ${RUSTFS_SECRET_KEY}
     ports:
       - "9000:9000"
-    environment:
-      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
-      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
     volumes:
       - rustfs_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce
+
+  admin-service:
+    build:
+      context: .
+      dockerfile: services/admin-service/Dockerfile
+    environment:
+      ADMIN_GRPC_PORT: ${ADMIN_GRPC_PORT}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - ecommerce
+    restart: unless-stopped
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: services/inventory-service/Dockerfile
+    environment:
+      INVENTORY_GRPC_PORT: ${INVENTORY_GRPC_PORT}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RUSTFS_ENDPOINT: http://rustfs:9000
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      RUSTFS_BUCKET: ${RUSTFS_BUCKET}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    networks:
+      - ecommerce
+    restart: unless-stopped
+
+  customer-service:
+    build:
+      context: .
+      dockerfile: services/customer-service/Dockerfile
+    environment:
+      CUSTOMER_GRPC_PORT: ${CUSTOMER_GRPC_PORT}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      OAUTH_SUPPORTED_PROVIDERS: ${OAUTH_SUPPORTED_PROVIDERS}
+      OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ecommerce
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    environment:
+      GATEWAY_PORT: ${GATEWAY_PORT}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      ADMIN_SERVICE_HOST: admin-service
+      ADMIN_SERVICE_PORT: ${ADMIN_GRPC_PORT}
+      INVENTORY_SERVICE_HOST: inventory-service
+      INVENTORY_SERVICE_PORT: ${INVENTORY_GRPC_PORT}
+      CUSTOMER_SERVICE_HOST: customer-service
+      CUSTOMER_SERVICE_PORT: ${CUSTOMER_GRPC_PORT}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      JWT_EXPIRES_IN_ADMIN: ${JWT_EXPIRES_IN_ADMIN}
+      JWT_EXPIRES_IN_CUSTOMER: ${JWT_EXPIRES_IN_CUSTOMER}
+    ports:
+      - "${GATEWAY_PORT}:${GATEWAY_PORT}"
+    depends_on:
+      - admin-service
+      - inventory-service
+      - customer-service
+    networks:
+      - ecommerce
+    restart: unless-stopped
 
 volumes:
   mysql_data:
   rustfs_data:
+
+networks:
+  ecommerce:
+    driver: bridge
