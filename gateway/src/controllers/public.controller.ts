@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { inventoryClient } from "../grpc-clients/inventory.client";
+import { customerClient } from "../grpc-clients/customer.client";
 import { callGrpc } from "../grpc-clients/index";
 
 export async function listCategories(
@@ -9,8 +9,8 @@ export async function listCategories(
 ): Promise<void> {
   try {
     const response = await callGrpc<any, any>(
-      inventoryClient,
-      "ListCategories",
+      customerClient,
+      "ListPublicCategories",
       {}
     );
     res.status(200).json(response);
@@ -35,8 +35,8 @@ export async function listProducts(
     }
 
     const categoriesResponse = await callGrpc<any, any>(
-      inventoryClient,
-      "ListCategories",
+      customerClient,
+      "ListPublicCategories",
       {}
     );
 
@@ -49,10 +49,14 @@ export async function listProducts(
       return;
     }
 
-    const response = await callGrpc<any, any>(inventoryClient, "ListProducts", {
-      category_id: matched.id,
-      pagination: { page, limit },
-    });
+    const response = await callGrpc<any, any>(
+      customerClient,
+      "ListPublicProducts",
+      {
+        category_id: matched.id,
+        pagination: { page, limit },
+      }
+    );
 
     res.status(200).json(response);
   } catch (err) {
@@ -66,9 +70,13 @@ export async function getProduct(
   next: NextFunction
 ): Promise<void> {
   try {
-    const response = await callGrpc<any, any>(inventoryClient, "GetProduct", {
-      id: req.params.id,
-    });
+    const response = await callGrpc<any, any>(
+      customerClient,
+      "GetPublicProduct",
+      {
+        id: req.params.id,
+      }
+    );
     res.status(200).json(response);
   } catch (err) {
     next(err);

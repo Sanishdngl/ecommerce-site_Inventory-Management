@@ -39,7 +39,7 @@ export interface Product {
 export interface Customer {
   id: string;
   email: string;
-  password_hash: string | null; // null for OAuth-only accounts
+  password_hash: string | null;
   oauth_provider: string | null;
   oauth_id: string | null;
   first_name: string;
@@ -58,16 +58,30 @@ export interface CartItem {
   updated_at: Date;
 }
 
+export interface EnrichedCartItem {
+  product_id: string;
+  product_name: string;
+  price: string;
+  thumbnail_url: string | null;
+  quantity: number;
+  stock_quantity: number;
+}
+
 export interface AuditLog {
   id: string;
   entity_type: AuditEntityType;
   entity_id: string;
   action: AuditAction;
-  performed_by: string; // FK → admin_users.id
+  performed_by: string;
   metadata: Record<string, unknown> | null;
   ip_address: string | null;
   created_at: Date;
 }
+
+export type AuditLogEntry = Omit<AuditLog, "id" | "created_at"> & {
+  metadata?: Record<string, unknown>;
+  ip_address?: string;
+};
 
 export interface AdminJWTPayload {
   admin_id: string;

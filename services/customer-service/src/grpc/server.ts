@@ -12,6 +12,11 @@ import {
   removeFromCart,
   getCart,
 } from "../handlers/cart.handlers";
+import {
+  listPublicCategories,
+  listPublicProducts,
+  getPublicProduct,
+} from "../handlers/public.handlers";
 
 export function createServer(): grpc.Server {
   const server = new grpc.Server();
@@ -28,6 +33,9 @@ export function createServer(): grpc.Server {
     UpdateCartItem: updateCartItem,
     RemoveFromCart: removeFromCart,
     GetCart: getCart,
+    ListPublicCategories: listPublicCategories,
+    ListPublicProducts: listPublicProducts,
+    GetPublicProduct: getPublicProduct,
   });
 
   return server;
