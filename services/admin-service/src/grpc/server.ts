@@ -8,6 +8,18 @@ import {
   toggleAdminStatus,
   listAdminUsersHandler,
 } from "../handlers/admin.handlers";
+import {
+  createCategory,
+  listCategories,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  listProducts,
+  getProduct,
+  updateStock,
+  uploadProductImage,
+  bulkUploadProducts,
+} from "../handlers/inventory.handlers";
 
 export function createServer(): grpc.Server {
   const server = new grpc.Server();
@@ -21,6 +33,17 @@ export function createServer(): grpc.Server {
     DeleteAdminUser: deleteAdminUser,
     ToggleAdminStatus: toggleAdminStatus,
     ListAdminUsers: listAdminUsersHandler,
+
+    CreateCategory: createCategory,
+    ListCategories: listCategories,
+    CreateProduct: createProduct,
+    UpdateProduct: updateProduct,
+    DeleteProduct: deleteProduct,
+    ListProducts: listProducts,
+    GetProduct: getProduct,
+    UpdateStock: updateStock,
+    UploadProductImage: uploadProductImage,
+    BulkUploadProducts: bulkUploadProducts,
   });
 
   return server;
