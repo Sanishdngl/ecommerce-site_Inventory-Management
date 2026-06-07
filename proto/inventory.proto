@@ -145,6 +145,14 @@ message BulkUploadResponse {
   repeated BulkUploadError errors  = 4;
 }
 
+message GetProductsByIdsRequest {
+  repeated string ids = 1;
+}
+
+message ProductListByIdsResponse {
+  repeated Product products = 1;
+}
+
 // Service
 
 service InventoryService {
@@ -161,4 +169,6 @@ service InventoryService {
 
   rpc UploadProductImage  (stream ProductImageChunk)   returns (ProductImageUploadResponse);
   rpc BulkUploadProducts  (stream BulkUploadChunk)     returns (BulkUploadResponse);
+
+  rpc GetProductsByIds    (GetProductsByIdsRequest)       returns (ProductListByIdsResponse);
 }

@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { inventoryClient } from "../grpc-clients/inventory.client";
+import { adminClient } from "../grpc-clients/admin.client";
 import { streamToGrpc, buildMeta } from "../grpc-clients/index";
 
 export async function bulkUploadProducts(
@@ -29,7 +29,7 @@ export async function bulkUploadProducts(
     ];
 
     const response = await streamToGrpc<any>(
-      inventoryClient,
+      adminClient,
       "BulkUploadProducts",
       messages,
       buildMeta(req.admin!.admin_id, req.ip)
