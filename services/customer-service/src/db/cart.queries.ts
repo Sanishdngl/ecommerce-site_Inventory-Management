@@ -1,15 +1,5 @@
 import type mysql from "mysql2/promise";
 import { v4 as uuidv4 } from "uuid";
-//import type { CartItem } from "@shared/types";
-
-export interface EnrichedCartItem {
-  product_id: string;
-  product_name: string;
-  price: string;
-  thumbnail_url: string | null;
-  quantity: number;
-  stock_quantity: number;
-}
 
 export async function upsertCartItem(
   db: mysql.Pool,
@@ -52,23 +42,13 @@ export async function removeCartItem(
   );
 }
 
-export async function getEnrichedCart(
+export async function getRawCartItems(
   db: mysql.Pool,
   customerId: string
-): Promise<EnrichedCartItem[]> {
+): Promise<{ product_id: string; quantity: number }[]> {
   const [rows] = await db.execute<any[]>(
-    `SELECT
-       ci.product_id,
-       p.name          AS product_name,
-       p.price,
-       p.thumbnail_url,
-       ci.quantity,
-       p.stock_quantity
-     FROM cart_items ci
-     JOIN products p ON p.id = ci.product_id
-     WHERE ci.customer_id = ?
-       AND p.is_active = true
-     ORDER BY ci.added_at ASC`,
+    `SELECT product_id, quantity FROM cart_items
+     WHERE customer_id = ? ORDER BY added_at ASC`,
     [customerId]
   );
   return rows;
