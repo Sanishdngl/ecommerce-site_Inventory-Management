@@ -10,6 +10,7 @@ import {
   softDeleteProduct,
   listProductsByCategory,
   updateStockQuantity,
+  findProductsByIds,
 } from "../db/product.queries";
 import { findCategoryById } from "../db/category.queries";
 import { uploadProductImage, type ImageType } from "../storage/rustfs.client";
@@ -267,3 +268,16 @@ export function uploadProductImageHandler(call: any, callback: any): void {
     console.error("[inventory] stream error:", err);
   });
 }
+
+export const getProductsByIds = handle(async (call, callback) => {
+  const db = getDb();
+  const { ids } = call.request as any;
+
+  if (!ids || ids.length === 0) {
+    callback(null, { products: [] });
+    return;
+  }
+
+  const products = await findProductsByIds(db, ids);
+  callback(null, { products });
+});

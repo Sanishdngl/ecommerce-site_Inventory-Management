@@ -9,6 +9,7 @@ import {
   listProducts,
   updateStock,
   uploadProductImageHandler,
+  getProductsByIds,
 } from "../handlers/product.handlers";
 import { bulkUploadProductsHandler } from "../handlers/bulk.handlers";
 
@@ -28,6 +29,7 @@ export function createServer(): grpc.Server {
     UpdateStock: updateStock,
     UploadProductImage: uploadProductImageHandler,
     BulkUploadProducts: bulkUploadProductsHandler,
+    GetProductsByIds: getProductsByIds,
   });
 
   return server;
