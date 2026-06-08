@@ -160,3 +160,18 @@ export async function updateStockQuantity(
   if (result.affectedRows === 0) return null;
   return findProductById(db, productId);
 }
+
+export async function findProductsByIds(
+  db: mysql.Pool,
+  ids: string[]
+): Promise<Product[]> {
+  if (ids.length === 0) return [];
+
+  const placeholders = ids.map(() => "?").join(", ");
+  const [rows] = await db.execute<any[]>(
+    `SELECT * FROM products
+     WHERE id IN (${placeholders}) AND is_active = true`,
+    ids
+  );
+  return rows;
+}

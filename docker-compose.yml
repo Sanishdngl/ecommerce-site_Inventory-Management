@@ -68,9 +68,13 @@ services:
       DB_NAME: ${DB_NAME}
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
+      INVENTORY_SERVICE_HOST:  inventory-service
+      INVENTORY_SERVICE_PORT:  ${INVENTORY_GRPC_PORT}
     depends_on:
       mysql:
         condition: service_healthy
+      inventory-service:
+        condition: service_started
     networks:
       - ecommerce
     restart: unless-stopped
@@ -118,11 +122,15 @@ services:
       REDIS_PORT: 6379
       OAUTH_SUPPORTED_PROVIDERS: ${OAUTH_SUPPORTED_PROVIDERS}
       OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID}
+      INVENTORY_SERVICE_HOST:    inventory-service
+      INVENTORY_SERVICE_PORT:    ${INVENTORY_GRPC_PORT}
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
+      inventory-service:
+        condition: service_started
     networks:
       - ecommerce
     restart: unless-stopped

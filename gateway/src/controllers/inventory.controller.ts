@@ -1,6 +1,152 @@
 import type { Request, Response, NextFunction } from "express";
 import { adminClient } from "../grpc-clients/admin.client";
-import { streamToGrpc, buildMeta } from "../grpc-clients/index";
+import { callGrpc, streamToGrpc, buildMeta } from "../grpc-clients/index";
+
+export async function createCategory(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { name, slug } = req.body;
+    const response = await callGrpc<any, any>(
+      adminClient,
+      "CreateCategory",
+      { name, slug },
+      buildMeta(req.admin!.admin_id, req.ip)
+    );
+    res.status(201).json(response);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function listCategories(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const response = await callGrpc<any, any>(
+      adminClient,
+      "ListCategories",
+      {}
+    );
+    res.status(200).json(response);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function createProduct(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { category_id, name, description, price, stock_quantity } = req.body;
+    const response = await callGrpc<any, any>(
+      adminClient,
+      "CreateProduct",
+      { category_id, name, description, price, stock_quantity },
+      buildMeta(req.admin!.admin_id, req.ip)
+    );
+    res.status(201).json(response);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateProduct(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { category_id, name, description, price, is_active } = req.body;
+    const response = await callGrpc<any, any>(
+      adminClient,
+      "UpdateProduct",
+      { id: req.params.id, category_id, name, description, price, is_active },
+      buildMeta(req.admin!.admin_id, req.ip)
+    );
+    res.status(200).json(response);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteProduct(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const response = await callGrpc<any, any>(
+      adminClient,
+      "DeleteProduct",
+      { id: req.params.id },
+      buildMeta(req.admin!.admin_id, req.ip)
+    );
+    res.status(200).json(response);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function listProducts(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const { category_id } = req.query;
+
+    const response = await callGrpc<any, any>(adminClient, "ListProducts", {
+      category_id,
+      pagination: { page, limit },
+    });
+    res.status(200).json(response);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getProduct(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const response = await callGrpc<any, any>(adminClient, "GetProduct", {
+      id: req.params.id,
+    });
+    res.status(200).json(response);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateStock(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { delta } = req.body;
+    const response = await callGrpc<any, any>(
+      adminClient,
+      "UpdateStock",
+      { product_id: req.params.id, delta },
+      buildMeta(req.admin!.admin_id, req.ip)
+    );
+    res.status(200).json(response);
+  } catch (err) {
+    next(err);
+  }
+}
 
 export async function bulkUploadProducts(
   req: Request,
