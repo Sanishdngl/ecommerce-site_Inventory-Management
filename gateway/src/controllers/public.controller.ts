@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { customerClient } from "../grpc-clients/customer.client";
+import { getCustomerClient } from "../grpc-clients/customer.client";
 import { callGrpc } from "../grpc-clients/index";
 
 export async function listCategories(
@@ -9,7 +9,7 @@ export async function listCategories(
 ): Promise<void> {
   try {
     const response = await callGrpc<any, any>(
-      customerClient,
+      getCustomerClient,
       "ListPublicCategories",
       {}
     );
@@ -35,7 +35,7 @@ export async function listProducts(
     }
 
     const categoriesResponse = await callGrpc<any, any>(
-      customerClient,
+      getCustomerClient,
       "ListPublicCategories",
       {}
     );
@@ -50,7 +50,7 @@ export async function listProducts(
     }
 
     const response = await callGrpc<any, any>(
-      customerClient,
+      getCustomerClient,
       "ListPublicProducts",
       {
         category_id: matched.id,
@@ -71,7 +71,7 @@ export async function getProduct(
 ): Promise<void> {
   try {
     const response = await callGrpc<any, any>(
-      customerClient,
+      getCustomerClient,
       "GetPublicProduct",
       {
         id: req.params.id,
