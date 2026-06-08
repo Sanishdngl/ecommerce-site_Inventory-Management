@@ -1,14 +1,24 @@
 import * as grpc from "@grpc/grpc-js";
 import { getAdminPackage } from "@shared/proto-loader";
 
-const adminPkg = getAdminPackage();
-const AdminServiceClient = adminPkg["AdminService"] as any;
+let client: any = null;
 
-if (!process.env.ADMIN_SERVICE_HOST || !process.env.ADMIN_SERVICE_PORT) {
-  throw new Error("ADMIN_SERVICE_HOST and ADMIN_SERVICE_PORT must be set");
+export function getAdminClient(): any {
+  if (client) return client;
+
+  const host = process.env.ADMIN_SERVICE_HOST;
+  const port = process.env.ADMIN_SERVICE_PORT;
+
+  if (!host || !port) {
+    throw new Error("ADMIN_SERVICE_HOST and ADMIN_SERVICE_PORT must be set");
+  }
+
+  const AdminServiceClient = getAdminPackage()["AdminService"] as any;
+
+  client = new AdminServiceClient(
+    `${host}:${port}`,
+    grpc.credentials.createInsecure()
+  );
+
+  return client;
 }
-
-export const adminClient = new AdminServiceClient(
-  `${process.env.ADMIN_SERVICE_HOST}:${process.env.ADMIN_SERVICE_PORT}`,
-  grpc.credentials.createInsecure()
-);
