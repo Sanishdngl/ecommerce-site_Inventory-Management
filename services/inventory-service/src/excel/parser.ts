@@ -23,7 +23,12 @@ export interface ParseResult {
 
 export async function parseProductExcel(buffer: Buffer): Promise<ParseResult> {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+  const arrayBuffer = buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength
+  ) as ArrayBuffer;
+
+  await workbook.xlsx.load(arrayBuffer);
 
   const sheet = workbook.worksheets[0];
   if (!sheet) {

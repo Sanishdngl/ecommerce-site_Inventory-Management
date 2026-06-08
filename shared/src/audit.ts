@@ -1,15 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import type * as mysql from "mysql2/promise";
-import type { AuditAction, AuditEntityType } from "./types";
-
-export interface AuditLogEntry {
-  entity_type: AuditEntityType;
-  entity_id: string;
-  action: AuditAction;
-  performed_by: string;
-  metadata?: Record<string, unknown>;
-  ip_address?: string;
-}
+import type { AuditLogEntry } from "./types";
 
 export async function writeAuditLog(
   db: mysql.Pool,
