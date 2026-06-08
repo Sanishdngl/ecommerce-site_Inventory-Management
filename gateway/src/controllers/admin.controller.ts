@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { adminClient } from "../grpc-clients/admin.client";
+import { getAdminClient } from "../grpc-clients/admin.client";
 import { callGrpc, buildMeta } from "../grpc-clients/index";
 import { signAdminJWT } from "@shared/jwt";
 
@@ -16,7 +16,7 @@ export async function loginAdmin(
       return;
     }
 
-    const response = await callGrpc<any, any>(adminClient, "LoginAdmin", {
+    const response = await callGrpc<any, any>(getAdminClient, "LoginAdmin", {
       username,
       password,
     });
@@ -42,7 +42,7 @@ export async function listAdminUsers(
     const limit = parseInt(req.query.limit as string) || 20;
 
     const response = await callGrpc<any, any>(
-      adminClient,
+      getAdminClient,
       "ListAdminUsers",
       { pagination: { page, limit } },
       buildMeta(req.admin!.admin_id, req.ip)
@@ -63,7 +63,7 @@ export async function createAdminUser(
     const { username, email, password, role } = req.body;
 
     const response = await callGrpc<any, any>(
-      adminClient,
+      getAdminClient,
       "CreateAdminUser",
       { username, email, password, role },
       buildMeta(req.admin!.admin_id, req.ip)
@@ -84,7 +84,7 @@ export async function updateAdminUser(
     const { username, email, role } = req.body;
 
     const response = await callGrpc<any, any>(
-      adminClient,
+      getAdminClient,
       "UpdateAdminUser",
       { id: req.params.id, username, email, role },
       buildMeta(req.admin!.admin_id, req.ip)
@@ -103,7 +103,7 @@ export async function deleteAdminUser(
 ): Promise<void> {
   try {
     const response = await callGrpc<any, any>(
-      adminClient,
+      getAdminClient,
       "DeleteAdminUser",
       { id: req.params.id },
       buildMeta(req.admin!.admin_id, req.ip)
@@ -122,7 +122,7 @@ export async function toggleAdminStatus(
 ): Promise<void> {
   try {
     const response = await callGrpc<any, any>(
-      adminClient,
+      getAdminClient,
       "ToggleAdminStatus",
       { id: req.params.id },
       buildMeta(req.admin!.admin_id, req.ip)
