@@ -325,7 +325,8 @@ describe("toggleAdminStatus", () => {
     const user = makeAdminUser({ id: "target-1", is_active: true });
     mockExecute
       .mockResolvedValueOnce([[user]]) //findById
-      .mockResolvedValueOnce([{ affectedRows: 1 }]); //toggle update
+      .mockResolvedValueOnce([{ affectedRows: 1 }]) //toggle update
+      .mockResolvedValueOnce([[user]]); // findById inside
 
     const callback = jest.fn();
     await toggleAdminStatus(makeCall({ id: "target-1" }, meta), callback);

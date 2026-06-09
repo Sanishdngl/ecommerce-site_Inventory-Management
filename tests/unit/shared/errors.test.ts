@@ -75,6 +75,10 @@ describe("handle wrapper", () => {
   });
 
   it("calls callback with INTERNAL on unknown error", async () => {
+    const consoleSpy = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
     const handler = handle(async (_call, _callback) => {
       throw new Error("something unexpected");
     });
@@ -86,5 +90,7 @@ describe("handle wrapper", () => {
       expect.objectContaining({ code: grpc.status.INTERNAL }),
       null
     );
+
+    consoleSpy.mockRestore();
   });
 });

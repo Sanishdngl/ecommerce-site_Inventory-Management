@@ -47,7 +47,7 @@ const mockProducts = [
 ];
 
 describe("addToCart", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => jest.resetAllMocks());
 
   it("adds item to cart and returns enriched cart", async () => {
     mockExecute
@@ -120,7 +120,7 @@ describe("addToCart", () => {
 });
 
 describe("updateCartItem", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => jest.resetAllMocks());
 
   it("updates quantity and returns enriched cart", async () => {
     mockExecute
@@ -172,7 +172,7 @@ describe("updateCartItem", () => {
 });
 
 describe("removeFromCart", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => jest.resetAllMocks());
 
   it("removes item and returns updated cart", async () => {
     mockExecute
@@ -180,7 +180,6 @@ describe("removeFromCart", () => {
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // delete
       .mockResolvedValueOnce([[]]); // getRawCartItems — empty
 
-    mockCallInventory.mockResolvedValueOnce({ products: [] });
     mockCacheDel.mockResolvedValue(undefined);
     mockCacheSet.mockResolvedValue(undefined);
 
@@ -215,7 +214,7 @@ describe("removeFromCart", () => {
 });
 
 describe("getCart", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => jest.resetAllMocks());
 
   it("returns cached cart when available", async () => {
     const cached = [
