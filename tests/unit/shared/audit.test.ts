@@ -50,10 +50,14 @@ describe("writeAuditLog", () => {
 
   it("swallows DB errors silently without throwing", async () => {
     mockExecute.mockRejectedValueOnce(new Error("DB connection lost"));
+    const consoleSpy = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
 
     const db = { execute: mockExecute } as any;
-
     await expect(writeAuditLog(db, baseEntry)).resolves.toBeUndefined();
+
+    consoleSpy.mockRestore();
   });
 
   it("serializes metadata as JSON string", async () => {

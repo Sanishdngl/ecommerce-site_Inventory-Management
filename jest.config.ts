@@ -12,9 +12,12 @@ const config: Config = {
     "^@shared/(.*)$": "<rootDir>/shared/src/$1",
   },
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', {
-      tsconfig: '<rootDir>/tests/tsconfig.json',
-    }],
+    "^.+\\.tsx?$": [
+      "ts-jest",
+      {
+        tsconfig: "<rootDir>/tests/tsconfig.json",
+      },
+    ],
   },
   collectCoverageFrom: [
     "shared/src/**/*.ts",
