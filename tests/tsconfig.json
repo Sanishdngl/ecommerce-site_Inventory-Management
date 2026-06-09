@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["jest", "node"],
+    "paths": {
+      "@shared/*": ["../shared/src/*"]
+    }
+  },
+  "include": [
+    "**/*.test.ts",
+    "../shared/src/**/*",
+    "../gateway/src/**/*",
+    "../services/*/src/**/*"
+  ]
+}

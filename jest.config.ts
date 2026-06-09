@@ -11,6 +11,11 @@ const config: Config = {
   moduleNameMapper: {
     "^@shared/(.*)$": "<rootDir>/shared/src/$1",
   },
+  transform: {
+    '^.+\\.tsx?$': ['ts-jest', {
+      tsconfig: '<rootDir>/tests/tsconfig.json',
+    }],
+  },
   collectCoverageFrom: [
     "shared/src/**/*.ts",
     "gateway/src/**/*.ts",

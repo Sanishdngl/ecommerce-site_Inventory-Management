@@ -78,7 +78,10 @@ export interface AuditLog {
   created_at: Date;
 }
 
-export type AuditLogEntry = Omit<AuditLog, "id" | "created_at"> & {
+export type AuditLogEntry = Omit<
+  AuditLog,
+  "id" | "created_at" | "metadata" | "ip_address"
+> & {
   metadata?: Record<string, unknown>;
   ip_address?: string;
 };
