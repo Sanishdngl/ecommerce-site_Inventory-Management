@@ -10,7 +10,9 @@ jest.mock("@shared/audit", () => ({
 }));
 
 jest.mock("@shared/password", () => ({
-  hashPassword: jest.fn().mockResolvedValue("$2b$12$hashedpassword"),
+  hashPassword: jest
+    .fn()
+    .mockResolvedValue("'TEST_HASH_NOT_A_REAL_BCRYPT_VALUE'"),
   verifyPassword: jest.fn(),
 }));
 
@@ -47,7 +49,7 @@ function makeAdminUser(overrides: Partial<any> = {}): any {
     id: "admin-1",
     username: "testadmin",
     email: "admin@test.com",
-    password_hash: "$2b$12$hashedpassword",
+    password_hash: "TEST_HASH_NOT_A_REAL_BCRYPT_VALUE",
     role: "super_admin",
     is_active: true,
     created_at: new Date(),

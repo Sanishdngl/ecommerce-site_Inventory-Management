@@ -3,7 +3,9 @@ import * as grpc from "@grpc/grpc-js";
 const mockExecute = jest.fn();
 jest.mock("@shared/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
 jest.mock("@shared/password", () => ({
-  hashPassword: jest.fn().mockResolvedValue("$2b$12$hashed"),
+  hashPassword: jest
+    .fn()
+    .mockResolvedValue("TEST_HASH_NOT_A_REAL_BCRYPT_VALUE"),
   verifyPassword: jest.fn(),
 }));
 jest.mock("@shared/errors", () => {
@@ -30,7 +32,7 @@ function makeCustomer(overrides: any = {}): any {
   return {
     id: "cust-1",
     email: "user@test.com",
-    password_hash: "$2b$12$hashed",
+    password_hash: "TEST_HASH_NOT_A_REAL_BCRYPT_VALUE",
     oauth_provider: null,
     oauth_id: null,
     first_name: "John",
