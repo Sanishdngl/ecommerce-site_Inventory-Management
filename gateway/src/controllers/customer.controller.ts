@@ -11,8 +11,9 @@ export async function registerCustomer(
   try {
     const { email, password, first_name, last_name } = req.body;
 
+    const customerClient = getCustomerClient();
     const response = await callGrpc<any, any>(
-      getCustomerClient,
+      customerClient,
       "RegisterCustomer",
       { email, password, first_name, last_name }
     );
@@ -38,14 +39,11 @@ export async function loginCustomer(
       return;
     }
 
-    const response = await callGrpc<any, any>(
-      getCustomerClient,
-      "LoginCustomer",
-      {
-        email,
-        password,
-      }
-    );
+    const customerClient = getCustomerClient();
+    const response = await callGrpc<any, any>(customerClient, "LoginCustomer", {
+      email,
+      password,
+    });
 
     const token = signCustomerJWT({ customer_id: response.customer.id });
 
@@ -68,7 +66,8 @@ export async function oauthLogin(
       return;
     }
 
-    const response = await callGrpc<any, any>(getCustomerClient, "OAuthLogin", {
+    const customerClient = getCustomerClient();
+    const response = await callGrpc<any, any>(customerClient, "OAuthLogin", {
       provider,
       token,
     });
@@ -87,7 +86,8 @@ export async function getProfile(
   next: NextFunction
 ): Promise<void> {
   try {
-    const response = await callGrpc<any, any>(getCustomerClient, "GetProfile", {
+    const customerClient = getCustomerClient();
+    const response = await callGrpc<any, any>(customerClient, "GetProfile", {
       customer_id: req.customer!.customer_id,
     });
     res.status(200).json(response);
@@ -104,15 +104,12 @@ export async function updateProfile(
   try {
     const { first_name, last_name } = req.body;
 
-    const response = await callGrpc<any, any>(
-      getCustomerClient,
-      "UpdateProfile",
-      {
-        customer_id: req.customer!.customer_id,
-        first_name,
-        last_name,
-      }
-    );
+    const customerClient = getCustomerClient();
+    const response = await callGrpc<any, any>(customerClient, "UpdateProfile", {
+      customer_id: req.customer!.customer_id,
+      first_name,
+      last_name,
+    });
     res.status(200).json(response);
   } catch (err) {
     next(err);
@@ -125,7 +122,8 @@ export async function getCart(
   next: NextFunction
 ): Promise<void> {
   try {
-    const response = await callGrpc<any, any>(getCustomerClient, "GetCart", {
+    const customerClient = getCustomerClient();
+    const response = await callGrpc<any, any>(customerClient, "GetCart", {
       customer_id: req.customer!.customer_id,
     });
     res.status(200).json(response);
@@ -147,7 +145,8 @@ export async function addToCart(
       return;
     }
 
-    const response = await callGrpc<any, any>(getCustomerClient, "AddToCart", {
+    const customerClient = getCustomerClient();
+    const response = await callGrpc<any, any>(customerClient, "AddToCart", {
       customer_id: req.customer!.customer_id,
       product_id,
       quantity,
@@ -171,8 +170,9 @@ export async function updateCartItem(
       return;
     }
 
+    const customerClient = getCustomerClient();
     const response = await callGrpc<any, any>(
-      getCustomerClient,
+      customerClient,
       "UpdateCartItem",
       {
         customer_id: req.customer!.customer_id,
@@ -192,8 +192,9 @@ export async function removeFromCart(
   next: NextFunction
 ): Promise<void> {
   try {
+    const customerClient = getCustomerClient();
     const response = await callGrpc<any, any>(
-      getCustomerClient,
+      customerClient,
       "RemoveFromCart",
       {
         customer_id: req.customer!.customer_id,

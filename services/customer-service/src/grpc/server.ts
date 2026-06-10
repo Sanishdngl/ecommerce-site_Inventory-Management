@@ -33,9 +33,9 @@ export function createServer(): grpc.Server {
     UpdateCartItem: updateCartItem,
     RemoveFromCart: removeFromCart,
     GetCart: getCart,
-    ListPublicCategories: listPublicCategories,
-    ListPublicProducts: listPublicProducts,
-    GetPublicProduct: getPublicProduct,
+    ListCategories: listPublicCategories,
+    ListProducts: listPublicProducts,
+    GetProduct: getPublicProduct,
   });
 
   return server;

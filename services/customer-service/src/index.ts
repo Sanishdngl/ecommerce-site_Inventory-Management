@@ -4,7 +4,7 @@ import { testDbConnection } from "@shared/db";
 import { testRedisConnection } from "@shared/redis";
 import { createServer } from "./grpc/server";
 
-const PORT = parseInt(process.env.CUSTOMER_GRPC_PORT ?? "50053", 10);
+const PORT = parseInt(process.env.CUSTOMER_SERVICE_PORT ?? "50053", 10);
 
 async function bootstrap(): Promise<void> {
   await testDbConnection();

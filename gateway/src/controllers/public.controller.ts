@@ -8,9 +8,10 @@ export async function listCategories(
   next: NextFunction
 ): Promise<void> {
   try {
+    const customerClient = getCustomerClient();
     const response = await callGrpc<any, any>(
-      getCustomerClient,
-      "ListPublicCategories",
+      customerClient,
+      "ListCategories",
       {}
     );
     res.status(200).json(response);
@@ -34,9 +35,10 @@ export async function listProducts(
       return;
     }
 
+    const customerClient = getCustomerClient();
     const categoriesResponse = await callGrpc<any, any>(
-      getCustomerClient,
-      "ListPublicCategories",
+      customerClient,
+      "ListCategories",
       {}
     );
 
@@ -49,14 +51,10 @@ export async function listProducts(
       return;
     }
 
-    const response = await callGrpc<any, any>(
-      getCustomerClient,
-      "ListPublicProducts",
-      {
-        category_id: matched.id,
-        pagination: { page, limit },
-      }
-    );
+    const response = await callGrpc<any, any>(customerClient, "ListProducts", {
+      category_id: matched.id,
+      pagination: { page, limit },
+    });
 
     res.status(200).json(response);
   } catch (err) {
@@ -70,13 +68,10 @@ export async function getProduct(
   next: NextFunction
 ): Promise<void> {
   try {
-    const response = await callGrpc<any, any>(
-      getCustomerClient,
-      "GetPublicProduct",
-      {
-        id: req.params.id,
-      }
-    );
+    const customerClient = getCustomerClient();
+    const response = await callGrpc<any, any>(customerClient, "GetProduct", {
+      id: req.params.id,
+    });
     res.status(200).json(response);
   } catch (err) {
     next(err);

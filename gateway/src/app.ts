@@ -2,8 +2,8 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
-import adminRouter from "./routes/admin.routes";
 import inventoryRouter from "./routes/inventory.routes";
+import adminRouter from "./routes/admin.routes";
 import publicRouter from "./routes/public.routes";
 import customerRouter from "./routes/customer.routes";
 import { grpcErrorHandler } from "./middleware/error.middleware";
@@ -22,10 +22,10 @@ app.use(
   })
 );
 
+app.use("/api/admin/inventory", inventoryRouter);
 app.use("/api/admin", adminRouter);
-app.use("/api/inventory", inventoryRouter);
-app.use("/api", publicRouter);
 app.use("/api/customer", customerRouter);
+app.use("/api", publicRouter);
 
 app.use(grpcErrorHandler);
 

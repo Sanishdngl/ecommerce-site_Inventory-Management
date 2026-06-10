@@ -9,11 +9,12 @@ export async function createCategory(
 ): Promise<void> {
   try {
     const { name, slug } = req.body;
+    const adminClient = getAdminClient();
     const response = await callGrpc<any, any>(
-      getAdminClient,
+      adminClient,
       "CreateCategory",
       { name, slug },
-      buildMeta(req.admin!.admin_id, req.ip)
+      buildMeta(req.admin!.admin_id, req.ip, req.admin!.role)
     );
     res.status(201).json(response);
   } catch (err) {
@@ -27,8 +28,9 @@ export async function listCategories(
   next: NextFunction
 ): Promise<void> {
   try {
+    const adminClient = getAdminClient();
     const response = await callGrpc<any, any>(
-      getAdminClient,
+      adminClient,
       "ListCategories",
       {}
     );
@@ -45,11 +47,12 @@ export async function createProduct(
 ): Promise<void> {
   try {
     const { category_id, name, description, price, stock_quantity } = req.body;
+    const adminClient = getAdminClient();
     const response = await callGrpc<any, any>(
-      getAdminClient,
+      adminClient,
       "CreateProduct",
       { category_id, name, description, price, stock_quantity },
-      buildMeta(req.admin!.admin_id, req.ip)
+      buildMeta(req.admin!.admin_id, req.ip, req.admin!.role)
     );
     res.status(201).json(response);
   } catch (err) {
@@ -64,11 +67,12 @@ export async function updateProduct(
 ): Promise<void> {
   try {
     const { category_id, name, description, price, is_active } = req.body;
+    const adminClient = getAdminClient();
     const response = await callGrpc<any, any>(
-      getAdminClient,
+      adminClient,
       "UpdateProduct",
       { id: req.params.id, category_id, name, description, price, is_active },
-      buildMeta(req.admin!.admin_id, req.ip)
+      buildMeta(req.admin!.admin_id, req.ip, req.admin!.role)
     );
     res.status(200).json(response);
   } catch (err) {
@@ -82,11 +86,12 @@ export async function deleteProduct(
   next: NextFunction
 ): Promise<void> {
   try {
+    const adminClient = getAdminClient();
     const response = await callGrpc<any, any>(
-      getAdminClient,
+      adminClient,
       "DeleteProduct",
       { id: req.params.id },
-      buildMeta(req.admin!.admin_id, req.ip)
+      buildMeta(req.admin!.admin_id, req.ip, req.admin!.role)
     );
     res.status(200).json(response);
   } catch (err) {
@@ -104,7 +109,8 @@ export async function listProducts(
     const limit = parseInt(req.query.limit as string) || 20;
     const { category_id } = req.query;
 
-    const response = await callGrpc<any, any>(getAdminClient, "ListProducts", {
+    const adminClient = getAdminClient();
+    const response = await callGrpc<any, any>(adminClient, "ListProducts", {
       category_id,
       pagination: { page, limit },
     });
@@ -120,7 +126,8 @@ export async function getProduct(
   next: NextFunction
 ): Promise<void> {
   try {
-    const response = await callGrpc<any, any>(getAdminClient, "GetProduct", {
+    const adminClient = getAdminClient();
+    const response = await callGrpc<any, any>(adminClient, "GetProduct", {
       id: req.params.id,
     });
     res.status(200).json(response);
@@ -136,11 +143,12 @@ export async function updateStock(
 ): Promise<void> {
   try {
     const { delta } = req.body;
+    const adminClient = getAdminClient();
     const response = await callGrpc<any, any>(
-      getAdminClient,
+      adminClient,
       "UpdateStock",
       { product_id: req.params.id, delta },
-      buildMeta(req.admin!.admin_id, req.ip)
+      buildMeta(req.admin!.admin_id, req.ip, req.admin!.role)
     );
     res.status(200).json(response);
   } catch (err) {
@@ -174,11 +182,12 @@ export async function bulkUploadProducts(
       })),
     ];
 
+    const adminClient = getAdminClient();
     const response = await streamToGrpc<any>(
-      getAdminClient,
+      adminClient,
       "BulkUploadProducts",
       messages,
-      buildMeta(req.admin!.admin_id, req.ip)
+      buildMeta(req.admin!.admin_id, req.ip, req.admin!.role)
     );
 
     res.status(200).json(response);

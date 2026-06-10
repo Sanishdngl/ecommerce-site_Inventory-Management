@@ -4,8 +4,11 @@ describe("CacheKey builders", () => {
   it("product key", () => {
     expect(CacheKey.product("abc")).toBe("product:abc");
   });
-  it("productList key", () => {
-    expect(CacheKey.productList("cat-1")).toBe("products:list:cat-1");
+  it("productList key — defaults", () => {
+    expect(CacheKey.productList("cat-1")).toBe("products:list:cat-1:1:20");
+  });
+  it("productList key — custom page and limit", () => {
+    expect(CacheKey.productList("cat-1", 2, 5)).toBe("products:list:cat-1:2:5");
   });
   it("categoriesAll key", () => {
     expect(CacheKey.categoriesAll()).toBe("categories:all");

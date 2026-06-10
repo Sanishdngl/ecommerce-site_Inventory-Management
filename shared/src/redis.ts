@@ -63,7 +63,8 @@ export const TTL = {
 
 export const CacheKey = {
   product: (id: string) => `product:${id}`,
-  productList: (categoryId: string) => `products:list:${categoryId}`,
+  productList: (categoryId: string, page = 1, limit = 20) =>
+    `products:list:${categoryId}:${page}:${limit}`,
   categoriesAll: () => `categories:all`,
   stock: (productId: string) => `stock:${productId}`,
   cart: (customerId: string) => `cart:${customerId}`,

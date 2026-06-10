@@ -133,7 +133,7 @@ export function bulkUploadProductsHandler(call: any, callback: any): void {
 
       const keysToDelete: string[] = [];
       for (const categoryId of affectedCategoryIds) {
-        keysToDelete.push(CacheKey.productList(categoryId));
+        keysToDelete.push(CacheKey.productList(categoryId, 1, 20));
       }
       for (const productId of insertedProductIds) {
         keysToDelete.push(CacheKey.stock(productId));

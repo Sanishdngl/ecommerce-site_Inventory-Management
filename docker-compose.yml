@@ -62,14 +62,14 @@ services:
       context: .
       dockerfile: services/admin-service/Dockerfile
     environment:
-      ADMIN_GRPC_PORT: ${ADMIN_GRPC_PORT}
+      ADMIN_SERVICE_PORT: ${ADMIN_SERVICE_PORT}
       DB_HOST: mysql
       DB_PORT: 3306
       DB_NAME: ${DB_NAME}
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      INVENTORY_SERVICE_HOST:  inventory-service
-      INVENTORY_SERVICE_PORT:  ${INVENTORY_GRPC_PORT}
+      INVENTORY_SERVICE_HOST: inventory-service
+      INVENTORY_SERVICE_PORT: ${INVENTORY_SERVICE_PORT}
     depends_on:
       mysql:
         condition: service_healthy
@@ -84,7 +84,7 @@ services:
       context: .
       dockerfile: services/inventory-service/Dockerfile
     environment:
-      INVENTORY_GRPC_PORT: ${INVENTORY_GRPC_PORT}
+      INVENTORY_SERVICE_PORT: ${INVENTORY_SERVICE_PORT}
       DB_HOST: mysql
       DB_PORT: 3306
       DB_NAME: ${DB_NAME}
@@ -112,7 +112,7 @@ services:
       context: .
       dockerfile: services/customer-service/Dockerfile
     environment:
-      CUSTOMER_GRPC_PORT: ${CUSTOMER_GRPC_PORT}
+      CUSTOMER_SERVICE_PORT: ${CUSTOMER_SERVICE_PORT}
       DB_HOST: mysql
       DB_PORT: 3306
       DB_NAME: ${DB_NAME}
@@ -122,8 +122,8 @@ services:
       REDIS_PORT: 6379
       OAUTH_SUPPORTED_PROVIDERS: ${OAUTH_SUPPORTED_PROVIDERS}
       OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID}
-      INVENTORY_SERVICE_HOST:    inventory-service
-      INVENTORY_SERVICE_PORT:    ${INVENTORY_GRPC_PORT}
+      INVENTORY_SERVICE_HOST: inventory-service
+      INVENTORY_SERVICE_PORT: ${INVENTORY_SERVICE_PORT}
     depends_on:
       mysql:
         condition: service_healthy
@@ -143,11 +143,11 @@ services:
       GATEWAY_PORT: ${GATEWAY_PORT}
       CORS_ORIGIN: ${CORS_ORIGIN}
       ADMIN_SERVICE_HOST: admin-service
-      ADMIN_SERVICE_PORT: ${ADMIN_GRPC_PORT}
+      ADMIN_SERVICE_PORT: ${ADMIN_SERVICE_PORT}
       INVENTORY_SERVICE_HOST: inventory-service
-      INVENTORY_SERVICE_PORT: ${INVENTORY_GRPC_PORT}
+      INVENTORY_SERVICE_PORT: ${INVENTORY_SERVICE_PORT}
       CUSTOMER_SERVICE_HOST: customer-service
-      CUSTOMER_SERVICE_PORT: ${CUSTOMER_GRPC_PORT}
+      CUSTOMER_SERVICE_PORT: ${CUSTOMER_SERVICE_PORT}
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
       JWT_EXPIRES_IN_ADMIN: ${JWT_EXPIRES_IN_ADMIN}

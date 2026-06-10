@@ -167,7 +167,7 @@ describe("createAdminUser", () => {
     expect(callback).toHaveBeenCalledWith(
       null,
       expect.objectContaining({
-        user: expect.objectContaining({ role: "maintainer" }),
+        user: expect.objectContaining({ role: "MAINTAINER" }),
       })
     );
     expect(writeAuditLog).toHaveBeenCalled();

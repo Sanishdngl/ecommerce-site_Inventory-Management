@@ -117,12 +117,15 @@ export async function listAdminUsers(
   page: number,
   limit: number
 ): Promise<{ users: AdminUser[]; total: number }> {
-  const offset = (page - 1) * limit;
+  const safeLimit = Math.max(1, parseInt(String(limit), 10));
+  const safeOffset = Math.max(0, parseInt(String((page - 1) * limit), 10));
 
   const [rows] = await db.execute<any[]>(
-    `SELECT * FROM admin_users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    [limit, offset]
+    `SELECT * FROM admin_users
+     ORDER BY created_at DESC
+     LIMIT ${safeLimit} OFFSET ${safeOffset}`
   );
+
   const [[{ total }]] = await db.execute<any[]>(
     `SELECT COUNT(*) as total FROM admin_users`
   );
