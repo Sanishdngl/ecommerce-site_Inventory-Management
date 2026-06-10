@@ -19,6 +19,7 @@ const config: Config = {
       },
     ],
   },
+  setupFilesAfterEnv: ["<rootDir>/tests/integration/setup.ts"],
   collectCoverageFrom: [
     "shared/src/**/*.ts",
     "gateway/src/**/*.ts",

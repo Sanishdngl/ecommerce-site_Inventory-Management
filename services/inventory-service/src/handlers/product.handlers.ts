@@ -40,7 +40,7 @@ export const createProduct = handle(async (call, callback) => {
     stock_quantity: stock_quantity ?? 0,
   });
 
-  await cacheDel(CacheKey.productList(category_id));
+  await cacheDel(CacheKey.productList(category_id, 1, 20));
 
   await writeAuditLog(db, {
     entity_type: "product",
@@ -79,11 +79,10 @@ export const updateProduct = handle(async (call, callback) => {
 
   await cacheDel(
     CacheKey.product(id),
-    CacheKey.productList(existing.category_id)
+    CacheKey.productList(existing.category_id, 1, 20)
   );
-
   if (category_id && category_id !== existing.category_id) {
-    await cacheDel(CacheKey.productList(category_id));
+    await cacheDel(CacheKey.productList(category_id, 1, 20));
   }
 
   const diff: Record<string, { from: unknown; to: unknown }> = {};
@@ -116,12 +115,13 @@ export const deleteProduct = handle(async (call, callback) => {
 
   const existing = await findProductById(db, id);
   if (!existing) throw Errors.notFound("Product not found");
+  if (!existing.is_active) throw Errors.notFound("Product not found");
 
   await softDeleteProduct(db, id);
 
   await cacheDel(
     CacheKey.product(id),
-    CacheKey.productList(existing.category_id)
+    CacheKey.productList(existing.category_id, 1, 20)
   );
 
   await writeAuditLog(db, {
@@ -165,7 +165,7 @@ export const listProducts = handle(async (call, callback) => {
   const page = pagination?.page || 1;
   const limit = pagination?.limit || 20;
 
-  const cacheKey = CacheKey.productList(category_id);
+  const cacheKey = CacheKey.productList(category_id, page, limit);
   if (page === 1) {
     const cached = await cacheGet<any>(cacheKey);
     if (cached) {

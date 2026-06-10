@@ -15,6 +15,18 @@ import {
   listAdminUsers,
 } from "../db/admin.queries";
 
+const DB_TO_PROTO_ROLE: Record<string, string> = {
+  super_admin: "SUPER_ADMIN",
+  maintainer: "MAINTAINER",
+  reporter: "REPORTER",
+};
+
+const PROTO_TO_DB_ROLE: Record<string, string> = {
+  SUPER_ADMIN: "super_admin",
+  MAINTAINER: "maintainer",
+  REPORTER: "reporter",
+};
+
 function getMetaValue(
   call: grpc.ServerUnaryCall<any, any>,
   key: string
@@ -32,7 +44,10 @@ function requireSuperAdmin(call: grpc.ServerUnaryCall<any, any>): void {
 
 function sanitizeUser(user: any) {
   const { password_hash, ...safe } = user;
-  return safe;
+  return {
+    ...safe,
+    role: DB_TO_PROTO_ROLE[safe.role] ?? safe.role,
+  };
 }
 
 export const loginAdmin = handle(async (call, callback) => {
@@ -61,7 +76,9 @@ export const createAdminUser = handle(async (call, callback) => {
   requireSuperAdmin(call);
 
   const db = getDb();
-  const { username, email, password, role } = call.request as any;
+  const { username, email, password } = call.request as any;
+  const rawRole = (call.request as any).role as string;
+  const role = PROTO_TO_DB_ROLE[rawRole] ?? rawRole;
 
   if (!username || !email || !password || !role) {
     throw Errors.invalidArgument(
@@ -70,7 +87,7 @@ export const createAdminUser = handle(async (call, callback) => {
   }
 
   const validRoles: AdminRole[] = ["maintainer", "reporter"];
-  if (!validRoles.includes(role)) {
+  if (!validRoles.includes(role as AdminRole)) {
     throw Errors.invalidArgument("role must be maintainer or reporter");
   }
 
@@ -80,7 +97,12 @@ export const createAdminUser = handle(async (call, callback) => {
   const existingEmail = await findAdminByEmail(db, email);
   if (existingEmail) throw Errors.alreadyExists("Email already in use");
 
-  const user = await insertAdminUser(db, { username, email, password, role });
+  const user = await insertAdminUser(db, {
+    username,
+    email,
+    password,
+    role: role as AdminRole,
+  });
   const performedBy = getMetaValue(call, "admin_id")!;
   const ipAddress = getMetaValue(call, "ip_address");
 
@@ -100,14 +122,23 @@ export const updateAdminUser = handle(async (call, callback) => {
   requireSuperAdmin(call);
 
   const db = getDb();
-  const { id, username, email, role } = call.request as any;
+  const { id, username, email } = call.request as any;
+  const rawRole = (call.request as any).role as string | undefined;
+  const role =
+    rawRole && rawRole !== "ADMIN_ROLE_UNSPECIFIED"
+      ? PROTO_TO_DB_ROLE[rawRole] ?? rawRole
+      : undefined;
 
   if (!id) throw Errors.invalidArgument("id is required");
 
   const existing = await findAdminById(db, id);
   if (!existing) throw Errors.notFound("Admin user not found");
 
-  const updated = await dbUpdateAdminUser(db, id, { username, email, role });
+  const updated = await dbUpdateAdminUser(db, id, {
+    username,
+    email,
+    role: role as AdminRole | undefined,
+  });
   const performedBy = getMetaValue(call, "admin_id")!;
   const ipAddress = getMetaValue(call, "ip_address");
 

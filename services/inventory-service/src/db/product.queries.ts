@@ -124,14 +124,15 @@ export async function listProductsByCategory(
   page: number,
   limit: number
 ): Promise<{ products: Product[]; total: number }> {
-  const offset = (page - 1) * limit;
+  const safeLimit = Math.max(1, parseInt(String(limit), 10));
+  const safeOffset = Math.max(0, parseInt(String((page - 1) * limit), 10));
 
   const [rows] = await db.execute<any[]>(
     `SELECT * FROM products
      WHERE category_id = ? AND is_active = true
      ORDER BY created_at DESC
-     LIMIT ? OFFSET ?`,
-    [categoryId, limit, offset]
+     LIMIT ${safeLimit} OFFSET ${safeOffset}`,
+    [categoryId]
   );
 
   const [[{ total }]] = await db.execute<any[]>(

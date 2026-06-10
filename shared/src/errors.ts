@@ -25,6 +25,19 @@ type GrpcHandler<Req, Res> = (
   callback: grpc.sendUnaryData<Res>
 ) => Promise<void>;
 
+function isDownstreamGrpcError(
+  err: unknown
+): err is { code: grpc.status; details: string } {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    "details" in err &&
+    typeof (err as any).code === "number" &&
+    typeof (err as any).details === "string"
+  );
+}
+
 export function handle<Req, Res>(
   fn: GrpcHandler<Req, Res>
 ): GrpcHandler<Req, Res> {
@@ -34,6 +47,8 @@ export function handle<Req, Res>(
     } catch (err) {
       if (err instanceof ServiceError) {
         callback({ code: err.code, message: err.message }, null);
+      } else if (isDownstreamGrpcError(err)) {
+        callback({ code: err.code, message: err.details }, null);
       } else {
         console.error("[grpc] unhandled error:", err);
         callback(

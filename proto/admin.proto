@@ -93,6 +93,7 @@ service AdminService {
   rpc UpdateProduct      (inventory.UpdateProductRequest)       returns (inventory.ProductResponse);
   rpc DeleteProduct      (inventory.DeleteProductRequest)       returns (common.StatusResponse);
   rpc GetProduct         (inventory.GetProductRequest)          returns (inventory.ProductResponse);
+  rpc ListCategories     (inventory.ListCategoriesRequest)      returns (inventory.CategoryListResponse);
   rpc ListProducts       (inventory.ListProductsRequest)        returns (inventory.ProductListResponse);
   rpc UpdateStock        (inventory.UpdateStockRequest)         returns (inventory.StockResponse);
   rpc UploadProductImage (stream inventory.ProductImageChunk)   returns (inventory.ProductImageUploadResponse);

@@ -5,7 +5,7 @@ import { testRedisConnection } from "@shared/redis";
 import { ensureBucket } from "./storage/rustfs.client";
 import { createServer } from "./grpc/server";
 
-const PORT = parseInt(process.env.INVENTORY_GRPC_PORT ?? "50052", 10);
+const PORT = parseInt(process.env.INVENTORY_SERVICE_PORT ?? "50052", 10);
 
 async function bootstrap(): Promise<void> {
   await testDbConnection();

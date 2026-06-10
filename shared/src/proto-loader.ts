@@ -4,15 +4,6 @@ import * as protoLoader from "@grpc/proto-loader";
 
 const PROTO_DIR = path.resolve(__dirname, "../../proto");
 
-const LOADER_OPTIONS: protoLoader.Options = {
-  keepCase: true,
-  longs: String,
-  enums: String,
-  defaults: true,
-  oneofs: true,
-  includeDirs: [PROTO_DIR],
-};
-
 const PROTO_FILES = {
   common: path.join(PROTO_DIR, "common.proto"),
   admin: path.join(PROTO_DIR, "admin.proto"),
@@ -21,6 +12,15 @@ const PROTO_FILES = {
 } as const;
 
 type ProtoName = keyof typeof PROTO_FILES;
+
+const LOADER_OPTIONS: protoLoader.Options = {
+  keepCase: true,
+  longs: String,
+  enums: String,
+  defaults: true,
+  oneofs: true,
+  includeDirs: [PROTO_DIR],
+};
 
 const cache = new Map<ProtoName, grpc.GrpcObject>();
 

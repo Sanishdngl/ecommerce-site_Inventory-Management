@@ -41,9 +41,14 @@ export function streamToGrpc<Res>(
   });
 }
 
-export function buildMeta(adminId?: string, ip?: string): grpc.Metadata {
+export function buildMeta(
+  adminId?: string,
+  ip?: string,
+  role?: string
+): grpc.Metadata {
   const meta = new grpc.Metadata();
   if (adminId) meta.set("admin_id", adminId);
   if (ip) meta.set("ip_address", ip);
+  if (role) meta.set("role", role);
   return meta;
 }
