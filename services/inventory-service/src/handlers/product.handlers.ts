@@ -204,7 +204,11 @@ export const updateStock = handle(async (call, callback) => {
     );
   }
 
-  await cacheDel(CacheKey.stock(product_id));
+  await cacheDel(
+    CacheKey.stock(product_id),
+    CacheKey.product(product_id),
+    CacheKey.productList(updated.category_id, 1, 20)
+  );
 
   callback(null, {
     product_id,
