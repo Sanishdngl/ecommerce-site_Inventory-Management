@@ -1,7 +1,10 @@
 import { getDb } from "@shared/db";
 import { hashPassword, verifyPassword } from "@shared/password";
 import { Errors, handle } from "@shared/errors";
+import { cacheSet, cacheGet, cacheDel, TTL, CacheKey } from "@shared/redis";
+import { generateRefreshToken } from "@shared/jwt";
 import {
+  findCustomerById,
   findCustomerByEmail,
   findCustomerByOAuth,
   insertCustomer,
@@ -41,7 +44,17 @@ export const registerCustomer = handle(async (call, callback) => {
     last_name,
   });
 
-  callback(null, { customer: sanitizeCustomer(customer) });
+  const refreshToken = generateRefreshToken();
+  await cacheSet(
+    CacheKey.refreshCustomer(refreshToken),
+    JSON.stringify({ customer_id: customer.id }),
+    TTL.REFRESH_TOKEN_CUSTOMER
+  );
+
+  callback(null, {
+    customer: sanitizeCustomer(customer),
+    refresh_token: refreshToken,
+  });
 });
 
 export const loginCustomer = handle(async (call, callback) => {
@@ -61,7 +74,17 @@ export const loginCustomer = handle(async (call, callback) => {
   const valid = await verifyPassword(password, customer.password_hash);
   if (!valid) throw Errors.unauthenticated("Invalid credentials");
 
-  callback(null, { customer: sanitizeCustomer(customer) });
+  const refreshToken = generateRefreshToken();
+  await cacheSet(
+    CacheKey.refreshCustomer(refreshToken),
+    JSON.stringify({ customer_id: customer.id }),
+    TTL.REFRESH_TOKEN_CUSTOMER
+  );
+
+  callback(null, {
+    customer: sanitizeCustomer(customer),
+    refresh_token: refreshToken,
+  });
 });
 
 export const oAuthLogin = handle(async (call, callback) => {
@@ -105,5 +128,54 @@ export const oAuthLogin = handle(async (call, callback) => {
     throw Errors.unauthenticated("Account is deactivated");
   }
 
-  callback(null, { customer: sanitizeCustomer(customer) });
+  const refreshToken = generateRefreshToken();
+  await cacheSet(
+    CacheKey.refreshCustomer(refreshToken),
+    JSON.stringify({ customer_id: customer.id }),
+    TTL.REFRESH_TOKEN_CUSTOMER
+  );
+
+  callback(null, {
+    customer: sanitizeCustomer(customer),
+    refresh_token: refreshToken,
+  });
+});
+
+export const refreshCustomerToken = handle(async (call, callback) => {
+  const { refresh_token } = call.request as any;
+
+  if (!refresh_token) {
+    throw Errors.invalidArgument("refresh_token is required");
+  }
+
+  const key = CacheKey.refreshCustomer(refresh_token);
+  const raw = await cacheGet<string>(key);
+
+  if (!raw) {
+    throw Errors.unauthenticated("Refresh token invalid or expired");
+  }
+
+  const { customer_id } = JSON.parse(raw as any);
+
+  const db = getDb();
+  const customer = await findCustomerById(db, customer_id);
+
+  if (!customer || !customer.is_active) {
+    await cacheDel(key);
+    throw Errors.unauthenticated("Customer account not found or deactivated");
+  }
+
+  await cacheDel(key);
+  const newRefreshToken = generateRefreshToken();
+  await cacheSet(
+    CacheKey.refreshCustomer(newRefreshToken),
+    JSON.stringify({ customer_id }),
+    TTL.REFRESH_TOKEN_CUSTOMER
+  );
+
+  callback(null, {
+    customer_id,
+    refresh_token: newRefreshToken,
+    customer: sanitizeCustomer(customer),
+  });
 });

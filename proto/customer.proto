@@ -5,8 +5,6 @@ package customer;
 import "common.proto";
 import "inventory.proto";
 
-// Customer 
-
 message CustomerUser {
   string          id             = 1;
   string          email          = 2;
@@ -35,9 +33,10 @@ message OAuthRequest {
   string token    = 2;   // OAuth id_token or access token from provider
 }
 
-// Returns customer data only; Gateway signs the JWT
 message AuthResponse {
   CustomerUser customer = 1;
+  string       refresh_token = 2;
+
 }
 
 message ProfileRequest {
@@ -85,25 +84,30 @@ message CartResponse {
   repeated CartItem items = 1;
 }
 
-// Service
+message RefreshCustomerRequest {
+  string refresh_token = 1;
+}
+
+message RefreshCustomerResponse {
+  string customer_id   = 1;
+  string refresh_token = 2;   // rotated
+  CustomerUser customer      = 3;
+}
 
 service CustomerService {
-  //Auth
   rpc RegisterCustomer(RegisterRequest)       returns (CustomerResponse);
   rpc LoginCustomer   (LoginRequest)          returns (AuthResponse);
   rpc OAuthLogin      (OAuthRequest)          returns (AuthResponse);
+  rpc RefreshToken    (RefreshCustomerRequest) returns (RefreshCustomerResponse);
   
-  //Profile
   rpc GetProfile      (ProfileRequest)        returns (CustomerResponse);
   rpc UpdateProfile   (UpdateProfileRequest)  returns (CustomerResponse);
 
-  //Cart
   rpc AddToCart       (CartItemRequest)       returns (CartResponse);
   rpc UpdateCartItem  (CartItemRequest)       returns (CartResponse);
   rpc RemoveFromCart  (RemoveCartRequest)     returns (CartResponse);
   rpc GetCart         (GetCartRequest)        returns (CartResponse);
 
-  //Inventory_reads
   rpc GetProduct     (inventory.GetProductRequest)     returns (inventory.ProductResponse);
   rpc ListProducts   (inventory.ListProductsRequest)   returns (inventory.ProductListResponse);
   rpc ListCategories (inventory.ListCategoriesRequest) returns (inventory.CategoryListResponse);

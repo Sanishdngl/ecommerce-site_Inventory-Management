@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "ts-node-dev -r tsconfig-paths/register --respawn --transpile-only src/index.ts",
-    "build": "tsc",
+    "build": "tsc --noEmit",
     "start": "ts-node -r tsconfig-paths/register --transpile-only src/index.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -13,6 +13,7 @@
     "@grpc/proto-loader": "^0.8.1",
     "bcrypt": "^6.0.0",
     "dotenv": "^17.4.2",
+    "ioredis": "^5.11.1",
     "mysql2": "^3.22.4",
     "uuid": "^9.0.1"
   },
@@ -20,6 +21,7 @@
     "@types/bcrypt": "^6.0.0",
     "@types/node": "^25.9.1",
     "@types/uuid": "^9.0.8",
+    "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^6.0.3"

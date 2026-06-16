@@ -1,6 +1,7 @@
 import "dotenv/config";
 import * as grpc from "@grpc/grpc-js";
 import { testDbConnection } from "@shared/db";
+import { testRedisConnection } from "@shared/redis";
 import { createServer } from "./grpc/server";
 
 const PORT = parseInt(process.env.ADMIN_SERVICE_PORT ?? "50051", 10);
@@ -8,6 +9,9 @@ const PORT = parseInt(process.env.ADMIN_SERVICE_PORT ?? "50051", 10);
 async function bootstrap(): Promise<void> {
   await testDbConnection();
   console.log("[admin-service] database connected");
+
+  await testRedisConnection();
+  console.log("[admin-service] redis connected");
 
   const server = createServer();
 

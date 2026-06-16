@@ -4,6 +4,7 @@ import {
   registerCustomer,
   loginCustomer,
   oAuthLogin,
+  refreshCustomerToken,
 } from "../handlers/auth.handlers";
 import { getProfile, updateProfile } from "../handlers/profile.handlers";
 import {
@@ -27,6 +28,7 @@ export function createServer(): grpc.Server {
     RegisterCustomer: registerCustomer,
     LoginCustomer: loginCustomer,
     OAuthLogin: oAuthLogin,
+    RefreshToken: refreshCustomerToken,
     GetProfile: getProfile,
     UpdateProfile: updateProfile,
     AddToCart: addToCart,

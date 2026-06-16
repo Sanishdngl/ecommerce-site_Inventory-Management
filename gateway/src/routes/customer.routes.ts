@@ -5,6 +5,7 @@ import {
   registerCustomer,
   loginCustomer,
   oauthLogin,
+  refreshCustomer,
   getProfile,
   updateProfile,
   getCart,
@@ -24,6 +25,7 @@ const authLimiter = rateLimit({
 router.post("/auth/register", authLimiter, registerCustomer);
 router.post("/auth/login", authLimiter, loginCustomer);
 router.post("/auth/oauth", authLimiter, oauthLogin);
+router.post("/auth/refresh", refreshCustomer);
 
 router.get("/profile", customerAuthMiddleware, getProfile);
 router.put("/profile", customerAuthMiddleware, updateProfile);

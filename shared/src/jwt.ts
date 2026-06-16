@@ -1,4 +1,5 @@
 import * as jwt from "jsonwebtoken";
+import crypto from 'crypto';
 import type { AdminJWTPayload, CustomerJWTPayload } from "./types";
 
 function getPrivateKey(): string {
@@ -17,7 +18,7 @@ export function signAdminJWT(payload: Omit<AdminJWTPayload, "exp">): string {
   return jwt.sign(payload, getPrivateKey(), {
     algorithm: "RS256",
     expiresIn: (process.env.JWT_EXPIRES_IN_ADMIN ??
-      "8h") as jwt.SignOptions["expiresIn"],
+      "15m") as jwt.SignOptions["expiresIn"],
   });
 }
 
@@ -33,7 +34,7 @@ export function signCustomerJWT(
   return jwt.sign(payload, getPrivateKey(), {
     algorithm: "RS256",
     expiresIn: (process.env.JWT_EXPIRES_IN_CUSTOMER ??
-      "24h") as jwt.SignOptions["expiresIn"],
+      "15m") as jwt.SignOptions["expiresIn"],
   });
 }
 
@@ -41,4 +42,8 @@ export function verifyCustomerJWT(token: string): CustomerJWTPayload {
   return jwt.verify(token, getPublicKey(), {
     algorithms: ["RS256"],
   }) as CustomerJWTPayload;
+}
+
+export function generateRefreshToken(): string {
+  return crypto.randomBytes(40).toString("hex");
 }

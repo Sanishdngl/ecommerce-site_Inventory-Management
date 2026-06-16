@@ -59,6 +59,8 @@ export const TTL = {
   CATEGORIES_ALL: 1800, // 30 min
   STOCK: 60, // 1 min
   CART: 86400, // 24h
+  REFRESH_TOKEN_ADMIN: 7 * 24 * 60 * 60, // 7 days
+  REFRESH_TOKEN_CUSTOMER: 30 * 24 * 60 * 60, // 30 days
 } as const;
 
 export const CacheKey = {
@@ -68,4 +70,6 @@ export const CacheKey = {
   categoriesAll: () => `categories:all`,
   stock: (productId: string) => `stock:${productId}`,
   cart: (customerId: string) => `cart:${customerId}`,
+  refreshAdmin: (token: string) => `refresh:admin:${token}`,
+  refreshCustomer: (token: string) => `refresh:customer:${token}`,
 } as const;
