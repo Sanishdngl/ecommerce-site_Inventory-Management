@@ -6,6 +6,7 @@ import {
 } from "../middleware/auth.middleware";
 import {
   loginAdmin,
+  refreshAdmin,
   listAdminUsers,
   createAdminUser,
   updateAdminUser,
@@ -22,6 +23,7 @@ const loginLimiter = rateLimit({
 });
 
 router.post("/auth/login", loginLimiter, loginAdmin);
+router.post("/auth/refresh", refreshAdmin);
 router.get(
   "/users",
   adminAuthMiddleware,

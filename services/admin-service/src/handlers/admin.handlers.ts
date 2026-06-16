@@ -2,6 +2,8 @@ import * as grpc from "@grpc/grpc-js";
 import { getDb } from "@shared/db";
 import { verifyPassword } from "@shared/password";
 import { writeAuditLog } from "@shared/audit";
+import { cacheSet, cacheGet, cacheDel, TTL, CacheKey } from "@shared/redis";
+import { generateRefreshToken } from "@shared/jwt";
 import { Errors, handle } from "@shared/errors";
 import type { AdminRole } from "@shared/types";
 import {
@@ -69,7 +71,14 @@ export const loginAdmin = handle(async (call, callback) => {
     throw Errors.unauthenticated("Invalid credentials");
   }
 
-  callback(null, { user: sanitizeUser(user) });
+  const refreshToken = generateRefreshToken();
+  await cacheSet(
+    CacheKey.refreshAdmin(refreshToken),
+    JSON.stringify({ admin_id: user.id, role: user.role }),
+    TTL.REFRESH_TOKEN_ADMIN
+  );
+
+  callback(null, { user: sanitizeUser(user), refresh_token: refreshToken });
 });
 
 export const createAdminUser = handle(async (call, callback) => {
@@ -244,5 +253,45 @@ export const listAdminUsersHandler = handle(async (call, callback) => {
   callback(null, {
     users: users.map(sanitizeUser),
     pagination: { total, page, limit },
+  });
+});
+
+export const refreshAdminToken = handle(async (call, callback) => {
+  const { refresh_token } = call.request as any;
+
+  if (!refresh_token) {
+    throw Errors.invalidArgument("refresh_token is required");
+  }
+
+  const key = CacheKey.refreshAdmin(refresh_token);
+  const raw = await cacheGet<string>(key);
+
+  if (!raw) {
+    throw Errors.unauthenticated("Refresh token invalid or expired");
+  }
+
+  const { admin_id, role } = JSON.parse(raw as any);
+
+  const db = getDb();
+  const user = await findAdminById(db, admin_id);
+
+  if (!user || !user.is_active) {
+    await cacheDel(key);
+    throw Errors.unauthenticated("Admin account not found or deactivated");
+  }
+
+  await cacheDel(key);
+  const newRefreshToken = generateRefreshToken();
+  await cacheSet(
+    CacheKey.refreshAdmin(newRefreshToken),
+    JSON.stringify({ admin_id, role }),
+    TTL.REFRESH_TOKEN_ADMIN
+  );
+
+  callback(null, {
+    admin_id,
+    role: DB_TO_PROTO_ROLE[role] ?? role,
+    refresh_token: newRefreshToken,
+    user: sanitizeUser(user),
   });
 });

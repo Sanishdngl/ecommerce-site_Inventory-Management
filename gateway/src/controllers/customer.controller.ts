@@ -20,7 +20,11 @@ export async function registerCustomer(
 
     const token = signCustomerJWT({ customer_id: response.customer.id });
 
-    res.status(201).json({ token, customer: response.customer });
+    res.status(201).json({
+      token,
+      refresh_token: response.refresh_token,
+      customer: response.customer,
+    });
   } catch (err) {
     next(err);
   }
@@ -47,7 +51,11 @@ export async function loginCustomer(
 
     const token = signCustomerJWT({ customer_id: response.customer.id });
 
-    res.status(200).json({ token, customer: response.customer });
+    res.status(200).json({
+      token,
+      refresh_token: response.refresh_token,
+      customer: response.customer,
+    });
   } catch (err) {
     next(err);
   }
@@ -74,7 +82,11 @@ export async function oauthLogin(
 
     const jwt = signCustomerJWT({ customer_id: response.customer.id });
 
-    res.status(200).json({ token: jwt, customer: response.customer });
+    res.status(200).json({
+      token,
+      refresh_token: response.refresh_token,
+      customer: response.customer,
+    });
   } catch (err) {
     next(err);
   }
@@ -202,6 +214,36 @@ export async function removeFromCart(
       }
     );
     res.status(200).json(response);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function refreshCustomer(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { refresh_token } = req.body;
+
+    if (!refresh_token) {
+      res.status(400).json({ message: "refresh_token is required" });
+      return;
+    }
+
+    const customerClient = getCustomerClient();
+    const response = await callGrpc<any, any>(customerClient, "RefreshToken", {
+      refresh_token,
+    });
+
+    const token = signCustomerJWT({ customer_id: response.customer_id });
+
+    res.status(200).json({
+      token,
+      refresh_token: response.refresh_token,
+      customer: response.customer,
+    });
   } catch (err) {
     next(err);
   }

@@ -50,7 +50,11 @@ export async function loginAdmin(
       role: normalized.role as AdminRole,
     });
 
-    res.status(200).json({ token, user: normalized });
+    res.status(200).json({
+      token,
+      refresh_token: response.refresh_token,
+      user: normalized,
+    });
   } catch (err) {
     next(err);
   }
@@ -166,6 +170,40 @@ export async function toggleAdminStatus(
     );
 
     res.status(200).json(response);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function refreshAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { refresh_token } = req.body;
+
+    if (!refresh_token) {
+      res.status(400).json({ message: "refresh_token is required" });
+      return;
+    }
+
+    const adminClient = getAdminClient();
+    const response = await callGrpc<any, any>(adminClient, "RefreshToken", {
+      refresh_token,
+    });
+
+    const normalized = normalizeUser(response.user);
+    const token = signAdminJWT({
+      admin_id: response.admin_id,
+      role: normalized.role as AdminRole,
+    });
+
+    res.status(200).json({
+      token,
+      refresh_token: response.refresh_token,
+      user: normalized,
+    });
   } catch (err) {
     next(err);
   }

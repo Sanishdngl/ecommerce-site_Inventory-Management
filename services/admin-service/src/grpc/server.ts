@@ -7,6 +7,7 @@ import {
   deleteAdminUser,
   toggleAdminStatus,
   listAdminUsersHandler,
+  refreshAdminToken,
 } from "../handlers/admin.handlers";
 import {
   createCategory,
@@ -33,6 +34,7 @@ export function createServer(): grpc.Server {
     DeleteAdminUser: deleteAdminUser,
     ToggleAdminStatus: toggleAdminStatus,
     ListAdminUsers: listAdminUsersHandler,
+    RefreshToken: refreshAdminToken,
 
     CreateCategory: createCategory,
     ListCategories: listCategories,
