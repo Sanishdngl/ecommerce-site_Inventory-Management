@@ -9,6 +9,7 @@ import {
   updateProduct as updateProductQuery,
   softDeleteProduct,
   listProductsByCategory,
+  listAllProducts,
   updateStockQuantity,
   findProductsByIds,
 } from "../db/product.queries";
@@ -40,7 +41,10 @@ export const createProduct = handle(async (call, callback) => {
     stock_quantity: stock_quantity ?? 0,
   });
 
-  await cacheDel(CacheKey.productList(category_id, 1, 20));
+  await cacheDel(
+    CacheKey.productList(category_id, 1, 20),
+    CacheKey.productListAll(1, 20)
+  );
 
   await writeAuditLog(db, {
     entity_type: "product",
@@ -79,7 +83,8 @@ export const updateProduct = handle(async (call, callback) => {
 
   await cacheDel(
     CacheKey.product(id),
-    CacheKey.productList(existing.category_id, 1, 20)
+    CacheKey.productList(existing.category_id, 1, 20),
+    CacheKey.productListAll(1, 20)
   );
   if (category_id && category_id !== existing.category_id) {
     await cacheDel(CacheKey.productList(category_id, 1, 20));
@@ -121,7 +126,8 @@ export const deleteProduct = handle(async (call, callback) => {
 
   await cacheDel(
     CacheKey.product(id),
-    CacheKey.productList(existing.category_id, 1, 20)
+    CacheKey.productList(existing.category_id, 1, 20),
+    CacheKey.productListAll(1, 20)
   );
 
   await writeAuditLog(db, {
@@ -160,11 +166,33 @@ export const listProducts = handle(async (call, callback) => {
   const db = getDb();
   const { category_id, pagination } = call.request as any;
 
-  if (!category_id) throw Errors.invalidArgument("category_id is required");
-
   const page = pagination?.page || 1;
   const limit = pagination?.limit || 20;
 
+  // All products
+  if (!category_id) {
+    const cacheKey = CacheKey.productListAll(page, limit);
+
+    if (page === 1) {
+      const cached = await cacheGet<any>(cacheKey);
+      if (cached) {
+        callback(null, cached);
+        return;
+      }
+    }
+
+    const { products, total } = await listAllProducts(db, page, limit);
+    const response = { products, pagination: { total, page, limit } };
+
+    if (page === 1) {
+      await cacheSet(cacheKey, response, TTL.PRODUCT_LIST);
+    }
+
+    callback(null, response);
+    return;
+  }
+
+  // product by category
   const cacheKey = CacheKey.productList(category_id, page, limit);
   if (page === 1) {
     const cached = await cacheGet<any>(cacheKey);
@@ -207,7 +235,8 @@ export const updateStock = handle(async (call, callback) => {
   await cacheDel(
     CacheKey.stock(product_id),
     CacheKey.product(product_id),
-    CacheKey.productList(updated.category_id, 1, 20)
+    CacheKey.productList(updated.category_id, 1, 20),
+    CacheKey.productListAll(1, 20)
   );
 
   callback(null, {

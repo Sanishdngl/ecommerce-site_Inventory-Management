@@ -118,6 +118,28 @@ export async function softDeleteProduct(
   );
 }
 
+export async function listAllProducts(
+  db: mysql.Pool,
+  page: number,
+  limit: number
+): Promise<{ products: Product[]; total: number }> {
+  const safeLimit = Math.max(1, parseInt(String(limit), 10));
+  const safeOffset = Math.max(0, parseInt(String((page - 1) * limit), 10));
+
+  const [rows] = await db.execute<any[]>(
+    `SELECT * FROM products
+     WHERE is_active = true
+     ORDER BY created_at DESC
+     LIMIT ${safeLimit} OFFSET ${safeOffset}`
+  );
+
+  const [[{ total }]] = await db.execute<any[]>(
+    `SELECT COUNT(*) as total FROM products WHERE is_active = true`
+  );
+
+  return { products: rows, total: Number(total) };
+}
+
 export async function listProductsByCategory(
   db: mysql.Pool,
   categoryId: string,
