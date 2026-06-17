@@ -10,6 +10,12 @@ describe("CacheKey builders", () => {
   it("productList key — custom page and limit", () => {
     expect(CacheKey.productList("cat-1", 2, 5)).toBe("products:list:cat-1:2:5");
   });
+  it("productListAll key — defaults", () => {
+    expect(CacheKey.productListAll()).toBe("products:list:all:1:20");
+  });
+  it("productListAll key — custom page and limit", () => {
+    expect(CacheKey.productListAll(2, 10)).toBe("products:list:all:2:10");
+  });
   it("categoriesAll key", () => {
     expect(CacheKey.categoriesAll()).toBe("categories:all");
   });

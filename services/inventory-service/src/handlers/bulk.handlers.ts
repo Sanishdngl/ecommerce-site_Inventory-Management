@@ -138,6 +138,7 @@ export function bulkUploadProductsHandler(call: any, callback: any): void {
       for (const productId of insertedProductIds) {
         keysToDelete.push(CacheKey.stock(productId));
       }
+      keysToDelete.push(CacheKey.productListAll(1, 20));
       if (keysToDelete.length > 0) {
         await cacheDel(...keysToDelete);
       }

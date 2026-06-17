@@ -107,13 +107,15 @@ export async function listProducts(
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
-    const { category_id } = req.query;
+    const category_id = req.query.category_id as string | undefined;
 
     const adminClient = getAdminClient();
-    const response = await callGrpc<any, any>(adminClient, "ListProducts", {
-      category_id,
-      pagination: { page, limit },
-    });
+    const response = await callGrpc<any, any>(
+      adminClient,
+      "ListProducts",
+      { ...(category_id ? { category_id } : {}), pagination: { page, limit } },
+      buildMeta(req.admin!.admin_id, req.ip, req.admin!.role)
+    );
     res.status(200).json(response);
   } catch (err) {
     next(err);

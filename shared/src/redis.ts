@@ -67,6 +67,8 @@ export const CacheKey = {
   product: (id: string) => `product:${id}`,
   productList: (categoryId: string, page = 1, limit = 20) =>
     `products:list:${categoryId}:${page}:${limit}`,
+  productListAll: (page = 1, limit = 20) =>
+    `products:list:all:${page}:${limit}`,
   categoriesAll: () => `categories:all`,
   stock: (productId: string) => `stock:${productId}`,
   cart: (customerId: string) => `cart:${customerId}`,

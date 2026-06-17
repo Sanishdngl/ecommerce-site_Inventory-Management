@@ -30,12 +30,20 @@ export async function listProducts(
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
 
+    const customerClient = getCustomerClient();
+
+    //no cate slug - retn all products
     if (!category) {
-      res.status(400).json({ message: "category slug is required" });
+      const response = await callGrpc<any, any>(
+        customerClient,
+        "ListProducts",
+        { pagination: { page, limit } }
+      );
+      res.status(200).json(response);
       return;
     }
 
-    const customerClient = getCustomerClient();
+    //cate slug - product based on that cate
     const categoriesResponse = await callGrpc<any, any>(
       customerClient,
       "ListCategories",
