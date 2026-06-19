@@ -4,12 +4,22 @@ import { callGrpc, buildMeta } from "../grpc-clients/index";
 import { signAdminJWT } from "@shared/jwt";
 import type { AdminRole } from "@shared/types";
 
+//  Cookie config
+const ADMIN_COOKIE_NAME = "admin_refresh_token";
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
+  path: "/",
+};
+
+// ── Role normalization
 const PROTO_ROLE_MAP: Record<string, AdminRole> = {
   SUPER_ADMIN: "super_admin",
   MAINTAINER: "maintainer",
   REPORTER: "reporter",
 };
-
 const APP_ROLE_TO_PROTO: Record<string, string> = {
   super_admin: "SUPER_ADMIN",
   maintainer: "MAINTAINER",
@@ -30,10 +40,15 @@ export async function loginAdmin(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { username, password } = req.body;
+    const { username, password, device_id, device_pixel_ratio } = req.body;
 
     if (!username || !password) {
       res.status(400).json({ message: "username and password are required" });
+      return;
+    }
+
+    if (!device_id) {
+      res.status(400).json({ message: "device_id is required" });
       return;
     }
 
@@ -41,6 +56,8 @@ export async function loginAdmin(
     const response = await callGrpc<any, any>(adminClient, "LoginAdmin", {
       username,
       password,
+      device_id,
+      device_pixel_ratio: device_pixel_ratio ?? 1,
     });
 
     const normalized = normalizeUser(response.user);
@@ -50,11 +67,63 @@ export async function loginAdmin(
       role: normalized.role as AdminRole,
     });
 
-    res.status(200).json({
-      token,
-      refresh_token: response.refresh_token,
-      user: normalized,
+    res.cookie(ADMIN_COOKIE_NAME, response.refresh_token, COOKIE_OPTIONS);
+
+    res.status(200).json({ token, user: normalized });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function refreshAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const refresh_token = req.cookies[ADMIN_COOKIE_NAME];
+
+    if (!refresh_token) {
+      res.status(400).json({ message: "refresh_token is required" });
+      return;
+    }
+
+    const adminClient = getAdminClient();
+    const response = await callGrpc<any, any>(adminClient, "RefreshToken", {
+      refresh_token,
     });
+
+    const normalized = normalizeUser(response.user);
+    const token = signAdminJWT({
+      admin_id: response.admin_id,
+      role: normalized.role as AdminRole,
+    });
+
+    res.cookie(ADMIN_COOKIE_NAME, response.refresh_token, COOKIE_OPTIONS);
+
+    res.status(200).json({ token, user: normalized });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function logoutAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const refreshToken = req.cookies[ADMIN_COOKIE_NAME];
+
+    if (refreshToken) {
+      const adminClient = getAdminClient();
+      await callGrpc<any, any>(adminClient, "LogoutAdmin", {
+        refresh_token: refreshToken,
+      }).catch(() => {});
+    }
+
+    res.clearCookie(ADMIN_COOKIE_NAME, { path: "/" });
+    res.status(200).json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -170,40 +239,6 @@ export async function toggleAdminStatus(
     );
 
     res.status(200).json(response);
-  } catch (err) {
-    next(err);
-  }
-}
-
-export async function refreshAdmin(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
-  try {
-    const { refresh_token } = req.body;
-
-    if (!refresh_token) {
-      res.status(400).json({ message: "refresh_token is required" });
-      return;
-    }
-
-    const adminClient = getAdminClient();
-    const response = await callGrpc<any, any>(adminClient, "RefreshToken", {
-      refresh_token,
-    });
-
-    const normalized = normalizeUser(response.user);
-    const token = signAdminJWT({
-      admin_id: response.admin_id,
-      role: normalized.role as AdminRole,
-    });
-
-    res.status(200).json({
-      token,
-      refresh_token: response.refresh_token,
-      user: normalized,
-    });
   } catch (err) {
     next(err);
   }

@@ -2,7 +2,8 @@ import { getDb } from "@shared/db";
 import { hashPassword, verifyPassword } from "@shared/password";
 import { Errors, handle } from "@shared/errors";
 import { cacheSet, cacheGet, cacheDel, TTL, CacheKey } from "@shared/redis";
-import { generateRefreshToken } from "@shared/jwt";
+import { generateRefreshToken, parseRefreshToken } from "@shared/jwt";
+import type { RefreshTokenPayload } from "@shared/types";
 import {
   findCustomerById,
   findCustomerByEmail,
@@ -16,15 +17,42 @@ function sanitizeCustomer(customer: any) {
   return safe;
 }
 
+async function issueRefreshToken(
+  customerId: string,
+  deviceId: string,
+  devicePixelRatio: number
+): Promise<string> {
+  const key = CacheKey.refreshCustomer(customerId, deviceId);
+  const refreshToken = generateRefreshToken(customerId, deviceId);
+
+  const payload: RefreshTokenPayload = {
+    token: refreshToken,
+    device_pixel_ratio: devicePixelRatio,
+    created_at: new Date().toISOString(),
+  };
+
+  await cacheSet(key, JSON.stringify(payload), TTL.REFRESH_TOKEN_CUSTOMER);
+  return refreshToken;
+}
+
 export const registerCustomer = handle(async (call, callback) => {
   const db = getDb();
-  const { email, password, first_name, last_name } = call.request as any;
+  const {
+    email,
+    password,
+    first_name,
+    last_name,
+    device_id,
+    device_pixel_ratio,
+  } = call.request as any;
 
   if (!email || !password || !first_name || !last_name) {
     throw Errors.invalidArgument(
       "email, password, first_name, and last_name are required"
     );
   }
+
+  if (!device_id) throw Errors.invalidArgument("device_id is required");
 
   if (password.length < 8) {
     throw Errors.invalidArgument("Password must be at least 8 characters");
@@ -34,7 +62,6 @@ export const registerCustomer = handle(async (call, callback) => {
   if (existing) throw Errors.alreadyExists("Email already registered");
 
   const password_hash = await hashPassword(password);
-
   const customer = await insertCustomer(db, {
     email,
     password_hash,
@@ -44,11 +71,10 @@ export const registerCustomer = handle(async (call, callback) => {
     last_name,
   });
 
-  const refreshToken = generateRefreshToken();
-  await cacheSet(
-    CacheKey.refreshCustomer(refreshToken),
-    JSON.stringify({ customer_id: customer.id }),
-    TTL.REFRESH_TOKEN_CUSTOMER
+  const refreshToken = await issueRefreshToken(
+    customer.id,
+    device_id,
+    device_pixel_ratio ?? 1
   );
 
   callback(null, {
@@ -59,11 +85,14 @@ export const registerCustomer = handle(async (call, callback) => {
 
 export const loginCustomer = handle(async (call, callback) => {
   const db = getDb();
-  const { email, password } = call.request as any;
+  const { email, password, device_id, device_pixel_ratio } =
+    call.request as any;
 
   if (!email || !password) {
     throw Errors.invalidArgument("email and password are required");
   }
+
+  if (!device_id) throw Errors.invalidArgument("device_id is required");
 
   const customer = await findCustomerByEmail(db, email);
 
@@ -74,11 +103,10 @@ export const loginCustomer = handle(async (call, callback) => {
   const valid = await verifyPassword(password, customer.password_hash);
   if (!valid) throw Errors.unauthenticated("Invalid credentials");
 
-  const refreshToken = generateRefreshToken();
-  await cacheSet(
-    CacheKey.refreshCustomer(refreshToken),
-    JSON.stringify({ customer_id: customer.id }),
-    TTL.REFRESH_TOKEN_CUSTOMER
+  const refreshToken = await issueRefreshToken(
+    customer.id,
+    device_id,
+    device_pixel_ratio ?? 1
   );
 
   callback(null, {
@@ -89,11 +117,14 @@ export const loginCustomer = handle(async (call, callback) => {
 
 export const oAuthLogin = handle(async (call, callback) => {
   const db = getDb();
-  const { provider, token } = call.request as any;
+  const { provider, token, device_id, device_pixel_ratio } =
+    call.request as any;
 
   if (!provider || !token) {
     throw Errors.invalidArgument("provider and token are required");
   }
+
+  if (!device_id) throw Errors.invalidArgument("device_id is required");
 
   let profile;
   try {
@@ -128,11 +159,10 @@ export const oAuthLogin = handle(async (call, callback) => {
     throw Errors.unauthenticated("Account is deactivated");
   }
 
-  const refreshToken = generateRefreshToken();
-  await cacheSet(
-    CacheKey.refreshCustomer(refreshToken),
-    JSON.stringify({ customer_id: customer.id }),
-    TTL.REFRESH_TOKEN_CUSTOMER
+  const refreshToken = await issueRefreshToken(
+    customer.id,
+    device_id,
+    device_pixel_ratio ?? 1
   );
 
   callback(null, {
@@ -141,21 +171,48 @@ export const oAuthLogin = handle(async (call, callback) => {
   });
 });
 
-export const refreshCustomerToken = handle(async (call, callback) => {
+export const logoutCustomer = handle(async (call, callback) => {
   const { refresh_token } = call.request as any;
 
+  if (refresh_token) {
+    const parsed = parseRefreshToken(refresh_token);
+    if (parsed) {
+      const { userId: customer_id, deviceId: device_id } = parsed;
+      const key = CacheKey.refreshCustomer(customer_id, device_id);
+      await cacheDel(key);
+    }
+  }
+
+  callback(null, { success: true, message: "Logged out" });
+});
+
+export const refreshCustomerToken = handle(async (call, callback) => {
+  const { refresh_token } = call.request as any;
   if (!refresh_token) {
     throw Errors.invalidArgument("refresh_token is required");
   }
 
-  const key = CacheKey.refreshCustomer(refresh_token);
-  const raw = await cacheGet<string>(key);
+  const parsed = parseRefreshToken(refresh_token);
+  if (!parsed) throw Errors.unauthenticated("Refresh token malformed");
 
+  const { userId: customer_id, deviceId: device_id } = parsed;
+  const key = CacheKey.refreshCustomer(customer_id, device_id);
+  const raw = await cacheGet<string>(key);
   if (!raw) {
     throw Errors.unauthenticated("Refresh token invalid or expired");
   }
 
-  const { customer_id } = JSON.parse(raw as any);
+  // token matches just rotated previous token
+  const stored: RefreshTokenPayload = JSON.parse(raw as any);
+  const isCurrent = stored.token === refresh_token;
+  const isPrevious =
+    stored.previous_token === refresh_token &&
+    stored.previous_token_expires_at &&
+    Date.now() < stored.previous_token_expires_at;
+
+  if (!isCurrent && !isPrevious) {
+    throw Errors.unauthenticated("Refresh token already rotated");
+  }
 
   const db = getDb();
   const customer = await findCustomerById(db, customer_id);
@@ -165,13 +222,27 @@ export const refreshCustomerToken = handle(async (call, callback) => {
     throw Errors.unauthenticated("Customer account not found or deactivated");
   }
 
-  await cacheDel(key);
-  const newRefreshToken = generateRefreshToken();
-  await cacheSet(
-    CacheKey.refreshCustomer(newRefreshToken),
-    JSON.stringify({ customer_id }),
-    TTL.REFRESH_TOKEN_CUSTOMER
-  );
+  // avoid rotation chain
+  if (isPrevious) {
+    callback(null, {
+      customer_id,
+      refresh_token: stored.token,
+      customer: sanitizeCustomer(customer),
+    });
+    return;
+  }
+
+  // noramal rotation
+  const newRefreshToken = generateRefreshToken(customer_id, device_id);
+  const newPayload: RefreshTokenPayload = {
+    token: newRefreshToken,
+    previous_token: stored.token,
+    previous_token_expires_at: Date.now() + TTL.REFRESH_GRACE_PERIOD * 1000,
+    device_pixel_ratio: stored.device_pixel_ratio,
+    created_at: new Date().toISOString(),
+  };
+
+  await cacheSet(key, JSON.stringify(newPayload), TTL.REFRESH_TOKEN_CUSTOMER);
 
   callback(null, {
     customer_id,

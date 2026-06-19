@@ -6,6 +6,7 @@ import {
   loginCustomer,
   oauthLogin,
   refreshCustomer,
+  logoutCustomer,
   getProfile,
   updateProfile,
   getCart,
@@ -26,6 +27,7 @@ router.post("/auth/register", authLimiter, registerCustomer);
 router.post("/auth/login", authLimiter, loginCustomer);
 router.post("/auth/oauth", authLimiter, oauthLogin);
 router.post("/auth/refresh", refreshCustomer);
+router.post("/auth/logout", logoutCustomer);
 
 router.get("/profile", customerAuthMiddleware, getProfile);
 router.put("/profile", customerAuthMiddleware, updateProfile);

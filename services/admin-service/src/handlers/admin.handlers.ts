@@ -3,9 +3,9 @@ import { getDb } from "@shared/db";
 import { verifyPassword } from "@shared/password";
 import { writeAuditLog } from "@shared/audit";
 import { cacheSet, cacheGet, cacheDel, TTL, CacheKey } from "@shared/redis";
-import { generateRefreshToken } from "@shared/jwt";
+import { generateRefreshToken, parseRefreshToken } from "@shared/jwt";
 import { Errors, handle } from "@shared/errors";
-import type { AdminRole } from "@shared/types";
+import type { AdminRole, RefreshTokenPayload } from "@shared/types";
 import {
   findAdminByUsername,
   findAdminById,
@@ -54,14 +54,17 @@ function sanitizeUser(user: any) {
 
 export const loginAdmin = handle(async (call, callback) => {
   const db = getDb();
-  const { username, password } = call.request as any;
+  const { username, password, device_id, device_pixel_ratio } =
+    call.request as any;
 
   if (!username || !password) {
     throw Errors.invalidArgument("username and password are required");
   }
+  if (!device_id) {
+    throw Errors.invalidArgument("device_id is required");
+  }
 
   const user = await findAdminByUsername(db, username);
-
   if (!user || !user.is_active) {
     throw Errors.unauthenticated("Invalid credentials");
   }
@@ -71,14 +74,35 @@ export const loginAdmin = handle(async (call, callback) => {
     throw Errors.unauthenticated("Invalid credentials");
   }
 
-  const refreshToken = generateRefreshToken();
-  await cacheSet(
-    CacheKey.refreshAdmin(refreshToken),
-    JSON.stringify({ admin_id: user.id, role: user.role }),
-    TTL.REFRESH_TOKEN_ADMIN
-  );
+  const key = CacheKey.refreshAdmin(user.id, device_id);
+
+  const refreshToken = generateRefreshToken(user.id, device_id);
+
+  const payload: RefreshTokenPayload = {
+    token: refreshToken,
+    role: user.role,
+    device_pixel_ratio: device_pixel_ratio ?? 1,
+    created_at: new Date().toISOString(),
+  };
+
+  await cacheSet(key, JSON.stringify(payload), TTL.REFRESH_TOKEN_ADMIN);
 
   callback(null, { user: sanitizeUser(user), refresh_token: refreshToken });
+});
+
+export const logoutAdmin = handle(async (call, callback) => {
+  const { refresh_token } = call.request as any;
+
+  if (refresh_token) {
+    const parsed = parseRefreshToken(refresh_token);
+    if (parsed) {
+      const { userId: admin_id, deviceId: device_id } = parsed;
+      const key = CacheKey.refreshAdmin(admin_id, device_id);
+      await cacheDel(key);
+    }
+  }
+
+  callback(null, { success: true, message: "Logged out" });
 });
 
 export const createAdminUser = handle(async (call, callback) => {
@@ -208,7 +232,6 @@ export const toggleAdminStatus = handle(async (call, callback) => {
 
   const db = getDb();
   const { id } = call.request as any;
-
   if (!id) throw Errors.invalidArgument("id is required");
 
   const existing = await findAdminById(db, id);
@@ -247,7 +270,6 @@ export const listAdminUsersHandler = handle(async (call, callback) => {
   const { pagination } = call.request as any;
   const page = pagination?.page || 1;
   const limit = pagination?.limit || 20;
-
   const { users, total } = await listAdminUsers(db, page, limit);
 
   callback(null, {
@@ -258,19 +280,33 @@ export const listAdminUsersHandler = handle(async (call, callback) => {
 
 export const refreshAdminToken = handle(async (call, callback) => {
   const { refresh_token } = call.request as any;
-
   if (!refresh_token) {
     throw Errors.invalidArgument("refresh_token is required");
   }
 
-  const key = CacheKey.refreshAdmin(refresh_token);
-  const raw = await cacheGet<string>(key);
+  const parsed = parseRefreshToken(refresh_token);
+  if (!parsed) {
+    throw Errors.unauthenticated("Refresh token malformed");
+  }
 
+  const { userId: admin_id, deviceId: device_id } = parsed;
+  const key = CacheKey.refreshAdmin(admin_id, device_id);
+  const raw = await cacheGet<string>(key);
   if (!raw) {
     throw Errors.unauthenticated("Refresh token invalid or expired");
   }
 
-  const { admin_id, role } = JSON.parse(raw as any);
+  // token matches just rotated previous token
+  const stored: RefreshTokenPayload = JSON.parse(raw as any);
+  const isCurrent = stored.token === refresh_token;
+  const isPrevious =
+    stored.previous_token === refresh_token &&
+    stored.previous_token_expires_at &&
+    Date.now() < stored.previous_token_expires_at;
+
+  if (!isCurrent && !isPrevious) {
+    throw Errors.unauthenticated("Refresh token already rotated");
+  }
 
   const db = getDb();
   const user = await findAdminById(db, admin_id);
@@ -280,17 +316,33 @@ export const refreshAdminToken = handle(async (call, callback) => {
     throw Errors.unauthenticated("Admin account not found or deactivated");
   }
 
-  await cacheDel(key);
-  const newRefreshToken = generateRefreshToken();
-  await cacheSet(
-    CacheKey.refreshAdmin(newRefreshToken),
-    JSON.stringify({ admin_id, role }),
-    TTL.REFRESH_TOKEN_ADMIN
-  );
+  // avoids rotation chains
+  if (isPrevious) {
+    callback(null, {
+      admin_id,
+      role: DB_TO_PROTO_ROLE[user.role] ?? user.role,
+      refresh_token: stored.token,
+      user: sanitizeUser(user),
+    });
+    return;
+  }
+
+  // normal rotation
+  const newRefreshToken = generateRefreshToken(admin_id, device_id);
+  const newPayload: RefreshTokenPayload = {
+    token: newRefreshToken,
+    previous_token: stored.token,
+    previous_token_expires_at: Date.now() + TTL.REFRESH_GRACE_PERIOD * 1000,
+    role: user.role,
+    device_pixel_ratio: stored.device_pixel_ratio,
+    created_at: new Date().toISOString(),
+  };
+
+  await cacheSet(key, JSON.stringify(newPayload), TTL.REFRESH_TOKEN_ADMIN);
 
   callback(null, {
     admin_id,
-    role: DB_TO_PROTO_ROLE[role] ?? role,
+    role: DB_TO_PROTO_ROLE[user.role] ?? user.role,
     refresh_token: newRefreshToken,
     user: sanitizeUser(user),
   });

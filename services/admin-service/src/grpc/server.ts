@@ -2,6 +2,7 @@ import * as grpc from "@grpc/grpc-js";
 import { getAdminPackage } from "@shared/proto-loader";
 import {
   loginAdmin,
+  logoutAdmin,
   createAdminUser,
   updateAdminUser,
   deleteAdminUser,
@@ -35,6 +36,7 @@ export function createServer(): grpc.Server {
     ToggleAdminStatus: toggleAdminStatus,
     ListAdminUsers: listAdminUsersHandler,
     RefreshToken: refreshAdminToken,
+    LogoutAdmin: logoutAdmin,
 
     CreateCategory: createCategory,
     ListCategories: listCategories,

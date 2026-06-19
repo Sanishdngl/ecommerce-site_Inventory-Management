@@ -21,16 +21,22 @@ message RegisterRequest {
   string password   = 2;
   string first_name = 3;
   string last_name  = 4;
+  string device_id          = 5;
+  float  device_pixel_ratio = 6;
 }
 
 message LoginRequest {
   string email    = 1;
   string password = 2;
+  string device_id = 3;
+  float  device_pixel_ratio = 4;
 }
 
 message OAuthRequest {
   string provider = 1;   // e.g. "google"; must match configured provider in env
   string token    = 2;   // OAuth id_token or access token from provider
+  string device_id = 3;
+  float  device_pixel_ratio = 4;
 }
 
 message AuthResponse {
@@ -88,6 +94,10 @@ message RefreshCustomerRequest {
   string refresh_token = 1;
 }
 
+message LogoutCustomerRequest{
+  string refresh_token = 1;
+}
+
 message RefreshCustomerResponse {
   string customer_id   = 1;
   string refresh_token = 2;   // rotated
@@ -99,6 +109,8 @@ service CustomerService {
   rpc LoginCustomer   (LoginRequest)          returns (AuthResponse);
   rpc OAuthLogin      (OAuthRequest)          returns (AuthResponse);
   rpc RefreshToken    (RefreshCustomerRequest) returns (RefreshCustomerResponse);
+  rpc LogoutCustomer   (LogoutCustomerRequest)   returns (common.StatusResponse);
+
   
   rpc GetProfile      (ProfileRequest)        returns (CustomerResponse);
   rpc UpdateProfile   (UpdateProfileRequest)  returns (CustomerResponse);

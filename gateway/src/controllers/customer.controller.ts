@@ -3,28 +3,55 @@ import { getCustomerClient } from "../grpc-clients/customer.client";
 import { callGrpc } from "../grpc-clients/index";
 import { signCustomerJWT } from "@shared/jwt";
 
+// Cookie config
+const CUSTOMER_COOKIE_NAME = "customer_refresh_token";
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in ms
+  path: "/",
+};
+
 export async function registerCustomer(
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const { email, password, first_name, last_name } = req.body;
+    const {
+      email,
+      password,
+      first_name,
+      last_name,
+      device_id,
+      device_pixel_ratio,
+    } = req.body;
+
+    if (!device_id) {
+      res.status(400).json({ message: "device_id is required" });
+      return;
+    }
 
     const customerClient = getCustomerClient();
     const response = await callGrpc<any, any>(
       customerClient,
       "RegisterCustomer",
-      { email, password, first_name, last_name }
+      {
+        email,
+        password,
+        first_name,
+        last_name,
+        device_id,
+        device_pixel_ratio: device_pixel_ratio ?? 1,
+      }
     );
 
     const token = signCustomerJWT({ customer_id: response.customer.id });
 
-    res.status(201).json({
-      token,
-      refresh_token: response.refresh_token,
-      customer: response.customer,
-    });
+    res.cookie(CUSTOMER_COOKIE_NAME, response.refresh_token, COOKIE_OPTIONS);
+
+    res.status(201).json({ token, customer: response.customer });
   } catch (err) {
     next(err);
   }
@@ -36,10 +63,14 @@ export async function loginCustomer(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { email, password } = req.body;
+    const { email, password, device_id, device_pixel_ratio } = req.body;
 
     if (!email || !password) {
       res.status(400).json({ message: "email and password are required" });
+      return;
+    }
+    if (!device_id) {
+      res.status(400).json({ message: "device_id is required" });
       return;
     }
 
@@ -47,15 +78,15 @@ export async function loginCustomer(
     const response = await callGrpc<any, any>(customerClient, "LoginCustomer", {
       email,
       password,
+      device_id,
+      device_pixel_ratio: device_pixel_ratio ?? 1,
     });
 
     const token = signCustomerJWT({ customer_id: response.customer.id });
 
-    res.status(200).json({
-      token,
-      refresh_token: response.refresh_token,
-      customer: response.customer,
-    });
+    res.cookie(CUSTOMER_COOKIE_NAME, response.refresh_token, COOKIE_OPTIONS);
+
+    res.status(200).json({ token, customer: response.customer });
   } catch (err) {
     next(err);
   }
@@ -67,10 +98,14 @@ export async function oauthLogin(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { provider, token } = req.body;
+    const { provider, token, device_id, device_pixel_ratio } = req.body;
 
     if (!provider || !token) {
       res.status(400).json({ message: "provider and token are required" });
+      return;
+    }
+    if (!device_id) {
+      res.status(400).json({ message: "device_id is required" });
       return;
     }
 
@@ -78,15 +113,65 @@ export async function oauthLogin(
     const response = await callGrpc<any, any>(customerClient, "OAuthLogin", {
       provider,
       token,
+      device_id,
+      device_pixel_ratio: device_pixel_ratio ?? 1,
     });
 
     const jwt = signCustomerJWT({ customer_id: response.customer.id });
 
-    res.status(200).json({
-      token,
-      refresh_token: response.refresh_token,
-      customer: response.customer,
+    res.cookie(CUSTOMER_COOKIE_NAME, response.refresh_token, COOKIE_OPTIONS);
+
+    res.status(200).json({ token: jwt, customer: response.customer });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function refreshCustomer(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const refreshToken = req.cookies[CUSTOMER_COOKIE_NAME];
+
+    if (!refreshToken) {
+      res.status(400).json({ message: "No refresh token" });
+      return;
+    }
+
+    const customerClient = getCustomerClient();
+    const response = await callGrpc<any, any>(customerClient, "RefreshToken", {
+      refresh_token: refreshToken,
     });
+
+    const token = signCustomerJWT({ customer_id: response.customer_id });
+
+    res.cookie(CUSTOMER_COOKIE_NAME, response.refresh_token, COOKIE_OPTIONS);
+
+    res.status(200).json({ token, customer: response.customer });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function logoutCustomer(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const refreshToken = req.cookies[CUSTOMER_COOKIE_NAME];
+
+    if (refreshToken) {
+      const customerClient = getCustomerClient();
+      await callGrpc<any, any>(customerClient, "LogoutCustomer", {
+        refresh_token: refreshToken,
+      }).catch(() => {});
+    }
+
+    res.clearCookie(CUSTOMER_COOKIE_NAME, { path: "/" });
+    res.status(200).json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -214,36 +299,6 @@ export async function removeFromCart(
       }
     );
     res.status(200).json(response);
-  } catch (err) {
-    next(err);
-  }
-}
-
-export async function refreshCustomer(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
-  try {
-    const { refresh_token } = req.body;
-
-    if (!refresh_token) {
-      res.status(400).json({ message: "refresh_token is required" });
-      return;
-    }
-
-    const customerClient = getCustomerClient();
-    const response = await callGrpc<any, any>(customerClient, "RefreshToken", {
-      refresh_token,
-    });
-
-    const token = signCustomerJWT({ customer_id: response.customer_id });
-
-    res.status(200).json({
-      token,
-      refresh_token: response.refresh_token,
-      customer: response.customer,
-    });
   } catch (err) {
     next(err);
   }
