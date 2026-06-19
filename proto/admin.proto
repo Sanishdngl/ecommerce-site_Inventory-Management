@@ -25,6 +25,8 @@ message AdminUser {
 message LoginAdminRequest {
   string username = 1;
   string password = 2;
+  string device_id          = 3;
+  float  device_pixel_ratio = 4;
 }
 
 message CreateAdminRequest {
@@ -71,6 +73,10 @@ message RefreshAdminRequest {
   string refresh_token = 1;
 }
 
+message LogoutAdminRequest { 
+  string refresh_token = 1;
+}
+
 message RefreshAdminResponse {
   string admin_id       = 1;
   string role           = 2;
@@ -86,6 +92,7 @@ service AdminService {
   rpc ToggleAdminStatus(ToggleStatusRequest) returns (common.StatusResponse);
   rpc ListAdminUsers   (ListAdminRequest)   returns (AdminUserListResponse);
   rpc RefreshToken      (RefreshAdminRequest) returns (RefreshAdminResponse);
+  rpc LogoutAdmin       (LogoutAdminRequest)  returns (common.StatusResponse);
 
   rpc CreateCategory     (inventory.CreateCategoryRequest)      returns (inventory.CategoryResponse);
   rpc CreateProduct      (inventory.CreateProductRequest)       returns (inventory.ProductResponse);

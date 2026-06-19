@@ -96,3 +96,12 @@ export interface CustomerJWTPayload {
   customer_id: string;
   exp: number;
 }
+
+export interface RefreshTokenPayload {
+  token: string;
+  previous_token?: string;
+  previous_token_expires_at?: number;
+  role?: string;
+  device_pixel_ratio: number;
+  created_at: string;
+}

@@ -7,6 +7,7 @@ import {
 import {
   loginAdmin,
   refreshAdmin,
+  logoutAdmin,
   listAdminUsers,
   createAdminUser,
   updateAdminUser,
@@ -24,6 +25,8 @@ const loginLimiter = rateLimit({
 
 router.post("/auth/login", loginLimiter, loginAdmin);
 router.post("/auth/refresh", refreshAdmin);
+router.post("/auth/logout", logoutAdmin);
+
 router.get(
   "/users",
   adminAuthMiddleware,
