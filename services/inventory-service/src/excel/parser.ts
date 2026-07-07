@@ -1,25 +1,5 @@
 import ExcelJS from "exceljs";
-
-export interface ParsedProductRow {
-  rowNumber: number;
-  name: string;
-  description: string;
-  price: string;
-  stock_quantity: number;
-  category_slug: string;
-  thumbnail_filename: string | null;
-  list_image_filename: string | null;
-}
-
-export interface RowError {
-  row: number;
-  message: string;
-}
-
-export interface ParseResult {
-  validRows: ParsedProductRow[];
-  errors: RowError[];
-}
+import { ParsedProductRow, RowError, ParseResult } from "@shared/types"
 
 export async function parseProductExcel(buffer: Buffer): Promise<ParseResult> {
   const workbook = new ExcelJS.Workbook();

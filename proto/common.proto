@@ -17,3 +17,12 @@ message PaginationMeta {
   int32  page  = 2;
   int32  limit = 3;
 }
+
+message Empty {}
+
+message HealthStatus {
+  string service    = 1;
+  bool   ok         = 2;
+  string message    = 3;
+  string checked_at = 4;
+}

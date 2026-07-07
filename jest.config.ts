@@ -10,6 +10,7 @@ const config: Config = {
   ],
   moduleNameMapper: {
     "^@shared/(.*)$": "<rootDir>/shared/src/$1",
+    "^@infrastructure/(.*)$": "<rootDir>/infrastructure/$1",
   },
   transform: {
     "^.+\\.tsx?$": [

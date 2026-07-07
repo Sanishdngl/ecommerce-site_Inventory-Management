@@ -1,10 +1,4 @@
-export interface OAuthProfile {
-  oauth_id: string;
-  email: string;
-  first_name: string;
-  last_name: string;
-  oauth_provider: string;
-}
+import { OAuthProfile } from "@shared/types";
 
 export async function verifyOAuthToken(
   provider: string,

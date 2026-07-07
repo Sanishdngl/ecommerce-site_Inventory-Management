@@ -1,4 +1,7 @@
-import { hashPassword, verifyPassword } from "../../../shared/src/password";
+import {
+  hashPassword,
+  verifyPassword,
+} from "../../../shared/src/auth/password";
 
 describe("hashPassword", () => {
   it("produces a bcrypt hash", async () => {

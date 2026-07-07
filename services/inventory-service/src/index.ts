@@ -1,21 +1,28 @@
 import "dotenv/config";
+import "@infrastructure/observability/tracing";
 import * as grpc from "@grpc/grpc-js";
-import { testDbConnection } from "@shared/db";
-import { testRedisConnection } from "@shared/redis";
-import { ensureBucket } from "./storage/rustfs.client";
+import { testDbConnection } from "@infrastructure/database/mysql";
+import { testRedisConnection } from "@infrastructure/redis/redis";
+import { ensureProductBucket } from "./storage/rustfs";
+import { startMetricsServer } from "@infrastructure/observability/metrics-server";
+import { logger } from "@infrastructure/observability/logger";
 import { createServer } from "./grpc/server";
 
+const SERVICE_NAME = "inventory-service";
 const PORT = parseInt(process.env.INVENTORY_SERVICE_PORT ?? "50052", 10);
+const METRICS_PORT = parseInt(process.env.INVENTORY_METRICS_PORT ?? "9102", 10);
 
 async function bootstrap(): Promise<void> {
   await testDbConnection();
-  console.log("[inventory-service] database connected");
+  logger.info(SERVICE_NAME, "Database connected");
 
   await testRedisConnection();
-  console.log("[inventory-service] redis connected");
+  logger.info(SERVICE_NAME, "Redis connected");
 
-  await ensureBucket();
-  console.log("[inventory-service] RustFS bucket ready");
+  await ensureProductBucket();
+  logger.info(SERVICE_NAME, "RustFS bucket ready");
+
+  startMetricsServer(METRICS_PORT, SERVICE_NAME);
 
   const server = createServer();
 
@@ -24,15 +31,20 @@ async function bootstrap(): Promise<void> {
     grpc.ServerCredentials.createInsecure(),
     (err, port) => {
       if (err) {
-        console.error("[inventory-service] failed to bind:", err.message);
+        logger.error(SERVICE_NAME, "Failed to bind gRPC server", {
+          error: err.message,
+        });
         process.exit(1);
       }
-      console.log(`[inventory-service] gRPC server running on port ${port}`);
+      logger.info(SERVICE_NAME, `gRPC server running on port ${port}`);
     }
   );
 }
 
 bootstrap().catch((err) => {
-  console.error("[inventory-service] bootstrap failed:", err);
+  logger.error(SERVICE_NAME, "Bootstrap failed", {
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+  });
   process.exit(1);
 });

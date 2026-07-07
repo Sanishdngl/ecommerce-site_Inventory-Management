@@ -42,12 +42,12 @@ export function streamToGrpc<Res>(
 }
 
 export function buildMeta(
-  adminId?: string,
+  userId?: string,
   ip?: string,
   role?: string
 ): grpc.Metadata {
   const meta = new grpc.Metadata();
-  if (adminId) meta.set("admin_id", adminId);
+  if (userId) meta.set("admin_id", userId);
   if (ip) meta.set("ip_address", ip);
   if (role) meta.set("role", role);
   return meta;

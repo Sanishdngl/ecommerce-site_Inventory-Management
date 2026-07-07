@@ -123,4 +123,6 @@ service CustomerService {
   rpc GetProduct     (inventory.GetProductRequest)     returns (inventory.ProductResponse);
   rpc ListProducts   (inventory.ListProductsRequest)   returns (inventory.ProductListResponse);
   rpc ListCategories (inventory.ListCategoriesRequest) returns (inventory.CategoryListResponse);
+
+  rpc HealthCheck (common.Empty) returns (common.HealthStatus);
 }

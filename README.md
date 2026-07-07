@@ -1,6 +1,6 @@
 # E-Commerce + Inventory Management — Backend
 
-A production-structured microservices backend for an e-commerce platform with integrated inventory management. Built with TypeScript, Express, gRPC, MySQL, Redis, and RustFS.
+Microservices backend for an e-commerce platform with integrated inventory management. TypeScript throughout, gRPC for inter-service calls, MySQL as system of record, Redis as a read-through cache, RustFS for object storage, and an OTel/Prometheus/Jaeger observability stack.
 
 ---
 
@@ -22,31 +22,34 @@ Service   Service
         ▼
   Inventory Service
         │
-   ┌────┴────┐
-   ▼         ▼
- MySQL     Redis
-         RustFS
+        ├──► MySQL (system of record)
+        ├──► Redis (read-through cache)
+        └──► RustFS (product images)
 ```
 
 **Routing contract:**
 
 - `Gateway → Admin Service → Inventory Service` for all admin inventory operations
 - `Gateway → Customer Service → Inventory Service` for all public reads and cart enrichment
-- Inventory Service is never called directly by the Gateway
+- Inventory Service is never called directly by the Gateway — this was a deliberate correction; see `admin.proto`/`customer.proto` inventory-proxying RPCs
+- **Cache population is read-through, on the request path:** Inventory Service checks Redis on reads (`cacheGet`), falls through to MySQL on miss, then repopulates (`cacheSet`). Writes invalidate the relevant keys directly (`cacheDel`/`cacheDelPattern`) in the same handler that performs the MySQL write — there is no separate consumer or async propagation step.
 
 ---
 
 ## Tech Stack
 
-| Layer          | Technology                     |
-| -------------- | ------------------------------ |
-| Gateway        | Express + Node.js (TypeScript) |
-| Services       | gRPC (TypeScript)              |
-| Database       | MySQL 8                        |
-| Cache          | Redis 7                        |
-| Object Storage | RustFS                         |
-| Auth           | JWT (RS256)                    |
-| Passwords      | bcrypt                         |
+| Layer          | Technology                           |
+| -------------- | ------------------------------------ |
+| Gateway        | Express + Node.js (TypeScript)       |
+| Services       | gRPC (`@grpc/grpc-js`, TypeScript)   |
+| Database       | MySQL 8.4                            |
+| Cache          | Redis 7 (`ioredis`)                  |
+| Object Storage | RustFS (S3-compatible)               |
+| Auth           | JWT (RS256) + refresh token rotation |
+| Passwords      | bcrypt                               |
+| Validation     | Zod, at all HTTP entry points        |
+| Tracing        | OpenTelemetry → OTLP/HTTP → Jaeger   |
+| Metrics        | `prom-client` → Prometheus           |
 
 ---
 
@@ -55,67 +58,73 @@ Service   Service
 ```
 /
 ├── gateway/                        # Express API Gateway
-│   ├── src/
-│   │   ├── controllers/            # Route handlers (admin, inventory, customer, public)
-│   │   ├── grpc-clients/           # Lazy-init gRPC client factories
-│   │   ├── middleware/             # Auth, error, upload middleware
-│   │   └── routes/                 # Express router definitions
-│   └── Dockerfile
+│   └── src/
+│       ├── controllers/            # admin, inventory, customer, public
+│       ├── grpc-clients/           # admin.client.ts, customer.client.ts
+│       │                          # — NO direct inventory client (by design)
+│       ├── middleware/             # auth, error, upload, zod validate
+│       └── routes/
 │
 ├── services/
-│   ├── admin-service/              # Admin user management + RBAC
-│   │   └── src/
-│   │       ├── db/                 # MySQL queries
-│   │       ├── grpc-clients/       # Inventory Service client
-│   │       ├── grpc/               # gRPC server setup
-│   │       └── handlers/           # Admin + inventory delegation handlers
+│   ├── admin-service/               # Admin user mgmt + RBAC + inventory delegation
+│   │   └── src/{db,grpc-clients,grpc,handlers}/
+│   │       # grpc-clients/ + handlers/inventory.handlers.ts: proxies
+│   │       # inventory ops from Admin's own gRPC surface to Inventory Service,
+│   │       # with audit logging at this delegation layer
 │   │
-│   ├── inventory-service/          # Products, categories, stock, media
-│   │   └── src/
-│   │       ├── db/                 # MySQL queries
-│   │       ├── excel/              # Bulk upload Excel parser
-│   │       ├── grpc/               # gRPC server setup
-│   │       ├── handlers/           # Category, product, bulk, image handlers
-│   │       └── storage/            # RustFS client
+│   ├── inventory-service/           # Products, categories, stock, media
+│   │   └── src/{db,excel,grpc,handlers,storage}/
+│   │       # handlers/ own the Redis read-through cache directly —
+│   │       # cacheGet/cacheSet on read, cacheDel/cacheDelPattern on write
 │   │
-│   └── customer-service/           # Auth, profile, cart, public reads
-│       └── src/
-│           ├── auth/               # OAuth token verification
-│           ├── db/                 # MySQL queries
-│           ├── grpc-clients/       # Inventory Service client
-│           ├── grpc/               # gRPC server setup
-│           └── handlers/           # Auth, profile, cart, public handlers
+│   └── customer-service/            # Auth, profile, cart, public reads
+│       └── src/{auth,db,grpc-clients,grpc,handlers}/
+│           # grpc-clients/: proxies inventory reads for public/cart enrichment
+│           # auth/: refresh tokens stored in Redis (separate keyspace from
+│           # inventory cache — see shared/src/auth/rotate-refresh-token.ts)
 │
-├── proto/                          # Shared .proto definitions
-│   ├── common.proto                # Shared messages (StatusResponse, Pagination)
-│   ├── admin.proto                 # AdminService + inventory delegation RPCs
-│   ├── inventory.proto             # InventoryService + all message types
-│   └── customer.proto              # CustomerService + public read RPCs
+├── infrastructure/                  # Shared runtime infra, imported via @infrastructure/*
+│   ├── database/
+│   │   └── mysql.ts                # connection pool (app DB_USER — least privilege)
+│   ├── redis/redis.ts               # client, cacheGet/Set/Del, TTL + CacheKey constants
+│   ├── storage/rustfs.ts
+│   ├── observability/
+│   │   ├── tracing.ts               # OTel SDK init — self-contained dotenv load,
+│   │   │                             # reads SERVICE_NAME before any -r preload ordering matters
+│   │   ├── metrics.ts               # prom-client registry, HTTP/gRPC/cache metrics
+│   │   ├── metrics-server.ts        # standalone :PORT/metrics HTTP server
+│   │   ├── logger.ts
+│   │   └── audit.ts                 # centralized audit log writer
+│   └── prometheus.yml
 │
-├── shared/                         # Shared TypeScript library
+├── proto/                           # Shared .proto definitions
+│   ├── common.proto                 # StatusResponse, Pagination
+│   ├── admin.proto                  # AdminService + inventory-proxying RPCs
+│   ├── inventory.proto              # InventoryService + all message types
+│   └── customer.proto                # CustomerService + public read RPCs
+│
+├── shared/                          # Shared TypeScript library (@shared/*)
 │   └── src/
-│       ├── audit.ts                # Centralized audit log writer
-│       ├── db.ts                   # MySQL connection pool
-│       ├── errors.ts               # ServiceError, handle wrapper, gRPC→HTTP map
-│       ├── index.ts                # Barrel export
-│       ├── jwt.ts                  # RS256 sign/verify
-│       ├── password.ts             # bcrypt hash/verify
-│       ├── proto-loader.ts         # Cached proto package loaders
-│       ├── redis.ts                # Redis client, cache helpers, TTL/CacheKey constants
-│       └── types.ts                # All shared TypeScript interfaces
+│       ├── auth/                    # jwt.ts (RS256), password.ts (bcrypt), refresh-token.ts
+│       ├── grpc/
+│       │   ├── client-factory.ts    # getGrpcClient() — memoized per service name
+│       │   ├── call-grpc.ts         # callGrpc() — Promise wrapper over callback-style stubs
+│       │   ├── inventory.client.ts  # the single shared Inventory client factory —
+│       │   │                        # instantiated by Admin/Customer Service, never Gateway
+│       │   └── proto-loader.ts      # cached @grpc/proto-loader package loaders
+│       ├── errors/                  # AppError, gRPC status ↔ HTTP status mapping
+│       ├── validation/              # Zod schemas — admin, customer, inventory
+│       ├── constants/                # roles.ts, permission.ts, status.ts
+│       └── types/
 │
-├── migrations/                     # Knex DB migrations (6 tables)
-├── seeds/                          # Super admin seed script
+├── migrations/                      # Knex migrations (6 tables) — app DB_USER only.
+│                                     # Server-level DDL (CREATE USER/GRANT) is out of scope
+│                                     # here by design.
+├── seeds/                           # Super admin seed script
+├── scripts/                         # One-off ops scripts
 ├── tests/
-│   ├── integration/                # Integration tests (requires running services)
-│   │   ├── gateway/                # admin, admin-users, inventory, customer, public
-│   │   └── helpers/                # Auth helpers, cleanup utilities
-│   └── unit/                       # Unit tests (no infrastructure required)
-│       ├── admin/
-│       ├── customer/
-│       ├── gateway/
-│       ├── inventory/
-│       └── shared/
+│   ├── integration/                 # requires running services
+│   └── unit/                        # no infrastructure required
 ├── docker-compose.yml
 ├── knexfile.ts
 └── jest.config.ts
@@ -170,18 +179,13 @@ console.log(publicKey.replace(/\n/g, '\\\\n'));
 
 ### 3. Configure environment files
 
-Create `.env` files per service. See the [Environment Variables](#environment-variables) section below.
+Create `.env` files per service. See [Environment Variables](#environment-variables).
 
-### 4. Start infrastructure
+### 4. Start core infrastructure
 
 ```bash
 docker compose up -d mysql redis rustfs
-```
-
-Wait for all three to show `healthy`:
-
-```bash
-docker compose ps
+docker compose ps   # wait for all three to show healthy
 ```
 
 ### 5. Run migrations and seed
@@ -193,7 +197,15 @@ npm run seed:run
 
 The seed script reads `SUPER_ADMIN_USERNAME`, `SUPER_ADMIN_EMAIL`, and `SUPER_ADMIN_PASSWORD` from the root `.env`. Set these before running.
 
-### 6. Start services
+### 6. Start observability sinks (optional, for tracing/metrics)
+
+```bash
+docker compose up -d jaeger prometheus
+```
+
+Jaeger UI: `http://localhost:16686`. Prometheus: `http://localhost:9090`. Each service also exposes its own `/metrics` endpoint directly (see [Observability](#observability)).
+
+### 7. Start services
 
 Open four terminals:
 
@@ -250,6 +262,9 @@ JWT_PRIVATE_KEY=        # RS256 private key — Gateway only
 JWT_PUBLIC_KEY=         # RS256 public key
 JWT_EXPIRES_IN_ADMIN=8h
 JWT_EXPIRES_IN_CUSTOMER=24h
+SERVICE_NAME=gateway
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
+METRICS_PORT=9101
 ```
 
 ### `services/admin-service/.env`
@@ -263,6 +278,9 @@ DB_USER=
 DB_PASSWORD=
 INVENTORY_SERVICE_HOST=localhost
 INVENTORY_SERVICE_PORT=50052
+SERVICE_NAME=admin-service
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
+METRICS_PORT=9102
 ```
 
 ### `services/inventory-service/.env`
@@ -280,6 +298,9 @@ RUSTFS_ENDPOINT=http://localhost:9000
 RUSTFS_ACCESS_KEY=
 RUSTFS_SECRET_KEY=
 RUSTFS_BUCKET=products
+SERVICE_NAME=inventory-service
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
+METRICS_PORT=9103
 ```
 
 ### `services/customer-service/.env`
@@ -297,9 +318,14 @@ INVENTORY_SERVICE_HOST=localhost
 INVENTORY_SERVICE_PORT=50052
 OAUTH_SUPPORTED_PROVIDERS=google
 OAUTH_GOOGLE_CLIENT_ID=
+SERVICE_NAME=customer-service
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
+METRICS_PORT=9104
 ```
 
 > **Security:** `JWT_PRIVATE_KEY` lives in Gateway only. All other services receive `JWT_PUBLIC_KEY` only. Never commit any `.env` file.
+>
+> `SERVICE_NAME` values are hyphenated (`inventory-service`) — this is intentional and preferred for the OTel resource attribute / trace label. Hyphens are invalid in Prometheus metric names, so `metrics.ts` sanitizes `SERVICE_NAME` into a separate valid prefix internally; don't "fix" this by renaming the env values.
 
 ---
 
@@ -326,13 +352,48 @@ npm run migrate:status      # Show migration status
 
 ---
 
+## Caching
+
+Redis is a read-through cache owned entirely by Inventory Service — no separate consumer or async propagation step:
+
+- **Read:** `cacheGet(CacheKey.*)` → on miss, read MySQL → `cacheSet(..., TTL.*)`.
+- **Write:** MySQL write, then `cacheDel`/`cacheDelPattern` for the affected keys in the same handler.
+
+Customer Service only reads these keys (via its Inventory client) and falls through on miss — it never sets them directly.
+
+### Cache keys
+
+| Cache Key                                   | Data           | TTL    | Written by        |
+| ------------------------------------------- | -------------- | ------ | ----------------- |
+| `product:{id}`                              | Single product | 10 min | inventory-service |
+| `products:list:{categoryId}:{page}:{limit}` | Product list   | 5 min  | inventory-service |
+| `categories:all`                            | All categories | 30 min | inventory-service |
+| `stock:{productId}`                         | Stock level    | 1 min  | inventory-service |
+
+Refresh tokens use a separate Redis keyspace (`shared/src/auth/rotate-refresh-token.ts`) — unrelated to the cache keys above, no shared TTL or eviction policy between the two.
+
+---
+
+## Observability
+
+Every service (Gateway, Admin, Inventory, Customer) initializes the same shared modules from `infrastructure/observability/`:
+
+- **Tracing** (`tracing.ts`): OTel SDK, auto-instruments `express`/`mysql2`/`ioredis`/`@grpc/grpc-js`. Exports OTLP/HTTP to Jaeger at `OTEL_EXPORTER_OTLP_ENDPOINT`. Loads its own `dotenv.config()` internally rather than relying on `-r` preload ordering, so `SERVICE_NAME` is guaranteed to be populated before the resource attribute is set, regardless of how the process was launched.
+- **Metrics** (`metrics.ts` + `metrics-server.ts`): `prom-client` registry with HTTP, gRPC, and Redis cache hit/miss metrics, all prefixed by a Prometheus-sanitized version of `SERVICE_NAME`. Each service exposes its own `:METRICS_PORT/metrics` endpoint, scraped independently by Prometheus (`infrastructure/prometheus.yml`) — not proxied through the Gateway.
+- **Audit** (`audit.ts`): centralized writer to the `audit_logs` table. Called explicitly at mutation points — notably at the Admin Service's inventory-delegation layer, so proxied inventory writes are attributed to the acting admin, not logged as if Inventory Service acted autonomously.
+
+---
+
 ## API Routes
 
 ### Admin Auth
 
-| Method | Path                    | Description        |
-| ------ | ----------------------- | ------------------ |
-| POST   | `/api/admin/auth/login` | Login, returns JWT |
+| Method | Path                      | Auth                | Description                        |
+| ------ | ------------------------- | ------------------- | ---------------------------------- |
+| POST   | `/api/admin/auth/login`   | none (rate-limited) | Login, returns JWT + refresh token |
+| POST   | `/api/admin/auth/refresh` | refresh token       | Rotate access token                |
+| POST   | `/api/admin/auth/logout`  | refresh token       | Revoke refresh token               |
+| GET    | `/api/admin/auth/me`      | admin JWT           | Session restoration                |
 
 ### Admin Users — `super_admin` only
 
@@ -344,7 +405,7 @@ npm run migrate:status      # Show migration status
 | DELETE | `/api/admin/users/:id`        | Delete user                   |
 | PATCH  | `/api/admin/users/:id/status` | Toggle active status          |
 
-### Admin Inventory — `super_admin` + `maintainer`
+### Admin Inventory — `super_admin` + `maintainer` (proxied to Inventory Service via Admin Service)
 
 | Method | Path                                      | Description                    |
 | ------ | ----------------------------------------- | ------------------------------ |
@@ -358,7 +419,7 @@ npm run migrate:status      # Show migration status
 | PATCH  | `/api/admin/inventory/products/:id/stock` | Update stock (delta)           |
 | POST   | `/api/admin/inventory/bulk-upload`        | Bulk upload via Excel + images |
 
-### Public — No auth required
+### Public — no auth required (served via Customer Service, cache-backed)
 
 | Method | Path                            | Description                    |
 | ------ | ------------------------------- | ------------------------------ |
@@ -368,13 +429,15 @@ npm run migrate:status      # Show migration status
 
 ### Customer Auth
 
-| Method | Path                          | Description                    |
-| ------ | ----------------------------- | ------------------------------ |
-| POST   | `/api/customer/auth/register` | Register with email + password |
-| POST   | `/api/customer/auth/login`    | Login with email + password    |
-| POST   | `/api/customer/auth/oauth`    | Login or register via OAuth    |
+| Method | Path                          | Auth                | Description                    |
+| ------ | ----------------------------- | ------------------- | ------------------------------ |
+| POST   | `/api/customer/auth/register` | none (rate-limited) | Register with email + password |
+| POST   | `/api/customer/auth/login`    | none (rate-limited) | Login with email + password    |
+| POST   | `/api/customer/auth/oauth`    | none (rate-limited) | Login or register via OAuth    |
+| POST   | `/api/customer/auth/refresh`  | refresh token       | Rotate access token            |
+| POST   | `/api/customer/auth/logout`   | refresh token       | Revoke refresh token           |
 
-### Customer — Requires customer JWT
+### Customer — requires customer JWT
 
 | Method | Path                            | Description            |
 | ------ | ------------------------------- | ---------------------- |
@@ -397,20 +460,6 @@ npm run migrate:status      # Show migration status
 
 ---
 
-## Caching Strategy (Redis)
-
-| Cache Key                                   | Data           | TTL    |
-| ------------------------------------------- | -------------- | ------ |
-| `product:{id}`                              | Single product | 10 min |
-| `products:list:{categoryId}:{page}:{limit}` | Product list   | 5 min  |
-| `categories:all`                            | All categories | 30 min |
-| `stock:{productId}`                         | Stock level    | 1 min  |
-| `cart:{customerId}`                         | Customer cart  | 24h    |
-
-All write operations invalidate the relevant cache keys.
-
----
-
 ## Testing
 
 ### Unit tests — no infrastructure required
@@ -421,8 +470,6 @@ npm run test:unit
 
 Covers: shared lib (JWT, password, errors, Redis keys, audit), gateway auth middleware, all service handlers (admin, customer, inventory), Excel parser.
 
-**138 tests across 13 suites.**
-
 ### Integration tests — all services must be running
 
 Create `tests/integration/.env.test.local` with all required values (see `.env.example` for the full list including `SUPER_ADMIN_USERNAME` and `SUPER_ADMIN_PASSWORD`).
@@ -432,8 +479,6 @@ npm run test:integration
 ```
 
 Covers: admin auth, admin user lifecycle, inventory CRUD + role enforcement, public product/category reads, customer registration/login/profile/cart full lifecycle.
-
-**65 tests across 5 suites.**
 
 ### Coverage report
 
@@ -471,11 +516,11 @@ name | description | price | stock_quantity | category_slug | thumbnail_filename
 ### Development infrastructure only
 
 ```bash
-docker compose up -d mysql redis rustfs
+docker compose up -d mysql redis rustfs jaeger prometheus
 docker compose down
 ```
 
-### Full stack (all services)
+### Full stack (all services, containerized)
 
 ```bash
 docker compose up -d --build
@@ -486,12 +531,13 @@ docker compose up -d --build
 ```
 MySQL (healthy) ──┐
 Redis (healthy) ──┤──► Inventory Service
-RustFS (healthy) ─┘
-                        │
-                        ├──► Admin Service
-                        └──► Customer Service
-                                    │
-                                    └──► Gateway
+RustFS (healthy) ─┘         │
+                             ├──► Admin Service
+                             └──► Customer Service
+
+Admin Service ──┐
+Customer Service ┤──► Gateway
+Inventory Service ┘
 ```
 
 ---
@@ -538,6 +584,5 @@ PRs require 1 approval. Squash and merge into `dev`. Only `dev → main` merges 
 - Order management
 - Email notifications
 - Admin reporting dashboards (data model ready, UI deferred)
-- JWT token refresh and revocation
 - Customer email change flow
 - TLS for inter-service gRPC communication

@@ -41,9 +41,14 @@ message UpdateAdminRequest {
   optional string  username = 2;
   optional string  email    = 3;
   optional AdminRole role   = 4;
+  optional string  password = 5;   // plaintext — hashed in admin-service before storage, same as CreateAdminRequest
 }
 
 message DeleteAdminRequest {
+  string id = 1;
+}
+
+message GetAdminRequest {
   string id = 1;
 }
 
@@ -84,9 +89,40 @@ message RefreshAdminResponse {
   AdminUser user        = 4;
 }
 
+// System checker — audit log viewer + aggregated service health
+
+message AuditLogEntryMsg {
+  string id           = 1;
+  string entity_type   = 2;
+  string entity_id     = 3;
+  string action        = 4;
+  string performed_by   = 5;
+  string performed_by_username = 6;   // hydrated via join; empty if the admin was deleted
+  string metadata      = 7;           // JSON-encoded; decoded client-side
+  string ip_address    = 8;
+  string created_at    = 9;
+}
+
+message ListAuditLogsRequest {
+  common.PaginationRequest pagination  = 1;
+  optional string          entity_type = 2;
+  optional string          action      = 3;
+}
+
+message AuditLogListResponse {
+  repeated AuditLogEntryMsg logs       = 1;
+  common.PaginationMeta     pagination = 2;
+}
+
+message SystemHealthResponse {
+  common.HealthStatus admin     = 1;
+  common.HealthStatus inventory = 2;
+}
+
 service AdminService {
   rpc LoginAdmin       (LoginAdminRequest)  returns (LoginAdminResponse);
   rpc CreateAdminUser  (CreateAdminRequest) returns (AdminUserResponse);
+  rpc GetAdminUser     (GetAdminRequest)    returns (AdminUserResponse);
   rpc UpdateAdminUser  (UpdateAdminRequest) returns (AdminUserResponse);
   rpc DeleteAdminUser  (DeleteAdminRequest) returns (common.StatusResponse);
   rpc ToggleAdminStatus(ToggleStatusRequest) returns (common.StatusResponse);
@@ -95,6 +131,9 @@ service AdminService {
   rpc LogoutAdmin       (LogoutAdminRequest)  returns (common.StatusResponse);
 
   rpc CreateCategory     (inventory.CreateCategoryRequest)      returns (inventory.CategoryResponse);
+  rpc GetCategory        (inventory.GetCategoryRequest)         returns (inventory.CategoryResponse);
+  rpc UpdateCategory     (inventory.UpdateCategoryRequest)      returns (inventory.CategoryResponse);
+  rpc DeleteCategory     (inventory.DeleteCategoryRequest)      returns (common.StatusResponse);
   rpc CreateProduct      (inventory.CreateProductRequest)       returns (inventory.ProductResponse);
   rpc UpdateProduct      (inventory.UpdateProductRequest)       returns (inventory.ProductResponse);
   rpc DeleteProduct      (inventory.DeleteProductRequest)       returns (common.StatusResponse);
@@ -104,4 +143,9 @@ service AdminService {
   rpc UpdateStock        (inventory.UpdateStockRequest)         returns (inventory.StockResponse);
   rpc UploadProductImage (stream inventory.ProductImageChunk)   returns (inventory.ProductImageUploadResponse);
   rpc BulkUploadProducts (stream inventory.BulkUploadChunk)     returns (inventory.BulkUploadResponse);
+
+  rpc GetInventoryStats (inventory.InventoryStatsRequest) returns (inventory.InventoryStatsResponse);
+
+  rpc ListAuditLogs (ListAuditLogsRequest) returns (AuditLogListResponse);
+  rpc HealthCheck   (common.Empty)         returns (SystemHealthResponse);
 }

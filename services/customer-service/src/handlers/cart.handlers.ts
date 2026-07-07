@@ -1,8 +1,20 @@
-import { getDb } from "@shared/db";
-import { cacheGet, cacheSet, cacheDel, TTL, CacheKey } from "@shared/redis";
-import { Errors, handle } from "@shared/errors";
+import { getDb } from "@infrastructure/database/mysql";
+import {
+  cacheGet,
+  cacheSet,
+  cacheDel,
+  TTL,
+  CacheKey,
+} from "@infrastructure/redis/redis";
+import { handle, NotFoundError } from "@shared/errors";
+import { callGrpc } from "@shared/grpc/call-grpc";
+import { validateGrpc } from "@shared/grpc/validate-grpc";
+import {
+  CartItemSchema,
+  RemoveCartSchema,
+  CustomerIdSchema,
+} from "@shared/validation/customer.schema";
 import type { EnrichedCartItem } from "@shared/types";
-import { callInventory } from "../grpc-clients/inventory.client";
 import {
   upsertCartItem,
   setCartItemQuantity,
@@ -11,6 +23,7 @@ import {
   cartItemExists,
 } from "../db/cart.queries";
 import { findCustomerById } from "../db/customer.queries";
+import { getInventoryClient } from "@shared/grpc/inventory.client";
 
 async function buildCart(
   db: any,
@@ -20,8 +33,11 @@ async function buildCart(
   if (cartItems.length === 0) return [];
 
   const ids = cartItems.map((i) => i.product_id);
-  const response = await callInventory<any, any>("GetProductsByIds", { ids });
-
+  const response = await callGrpc<any, any>(
+    getInventoryClient(),
+    "GetProductsByIds",
+    { ids }
+  );
   const productMap = new Map(
     (response.products as any[]).map((p: any) => [p.id, p])
   );
@@ -43,17 +59,13 @@ async function buildCart(
 
 export const addToCart = handle(async (call, callback) => {
   const db = getDb();
-  const { customer_id, product_id, quantity } = call.request as any;
-
-  if (!customer_id || !product_id) {
-    throw Errors.invalidArgument("customer_id and product_id are required");
-  }
-  if (!quantity || quantity <= 0) {
-    throw Errors.invalidArgument("quantity must be greater than zero");
-  }
+  const { customer_id, product_id, quantity } = validateGrpc(
+    CartItemSchema,
+    call.request
+  );
 
   const customer = await findCustomerById(db, customer_id);
-  if (!customer) throw Errors.notFound("Customer not found");
+  if (!customer) throw new NotFoundError("Customer not found");
 
   await upsertCartItem(db, customer_id, product_id, quantity);
   await cacheDel(CacheKey.cart(customer_id));
@@ -66,20 +78,13 @@ export const addToCart = handle(async (call, callback) => {
 
 export const updateCartItem = handle(async (call, callback) => {
   const db = getDb();
-  const { customer_id, product_id, quantity } = call.request as any;
-
-  if (!customer_id || !product_id) {
-    throw Errors.invalidArgument("customer_id and product_id are required");
-  }
-
-  if (!quantity || quantity <= 0) {
-    throw Errors.invalidArgument(
-      "quantity must be greater than zero — use RemoveFromCart to remove an item"
-    );
-  }
+  const { customer_id, product_id, quantity } = validateGrpc(
+    CartItemSchema,
+    call.request
+  );
 
   const exists = await cartItemExists(db, customer_id, product_id);
-  if (!exists) throw Errors.notFound("Cart item not found");
+  if (!exists) throw new NotFoundError("Cart item not found");
 
   await setCartItemQuantity(db, customer_id, product_id, quantity);
   await cacheDel(CacheKey.cart(customer_id));
@@ -92,14 +97,13 @@ export const updateCartItem = handle(async (call, callback) => {
 
 export const removeFromCart = handle(async (call, callback) => {
   const db = getDb();
-  const { customer_id, product_id } = call.request as any;
-
-  if (!customer_id || !product_id) {
-    throw Errors.invalidArgument("customer_id and product_id are required");
-  }
+  const { customer_id, product_id } = validateGrpc(
+    RemoveCartSchema,
+    call.request
+  );
 
   const exists = await cartItemExists(db, customer_id, product_id);
-  if (!exists) throw Errors.notFound("Cart item not found");
+  if (!exists) throw new NotFoundError("Cart item not found");
 
   await removeCartItem(db, customer_id, product_id);
   await cacheDel(CacheKey.cart(customer_id));
@@ -112,9 +116,7 @@ export const removeFromCart = handle(async (call, callback) => {
 
 export const getCart = handle(async (call, callback) => {
   const db = getDb();
-  const { customer_id } = call.request as any;
-
-  if (!customer_id) throw Errors.invalidArgument("customer_id is required");
+  const { customer_id } = validateGrpc(CustomerIdSchema, call.request);
 
   const cached = await cacheGet<EnrichedCartItem[]>(CacheKey.cart(customer_id));
   if (cached) {

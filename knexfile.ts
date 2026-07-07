@@ -1,6 +1,6 @@
 import type { Knex } from "knex";
 import dotenv from "dotenv";
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const config: Knex.Config = {
   client: "mysql2",

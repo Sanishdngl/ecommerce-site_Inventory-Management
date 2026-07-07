@@ -1,7 +1,24 @@
-import { getDb } from "@shared/db";
-import { cacheGet, cacheSet, cacheDel, TTL, CacheKey } from "@shared/redis";
-import { writeAuditLog } from "@shared/audit";
-import { Errors, handle } from "@shared/errors";
+import { getDb } from "@infrastructure/database/mysql";
+import {
+  cacheGet,
+  cacheSet,
+  cacheDel,
+  cacheDelPattern,
+  TTL,
+  CacheKey,
+} from "@infrastructure/redis/redis";
+import { writeAuditLog } from "@infrastructure/observability/audit";
+import { logger } from "@infrastructure/observability/logger";
+import { handle, BadRequestError, NotFoundError } from "@shared/errors";
+import { validateGrpc } from "@shared/grpc/validate-grpc";
+import {
+  CreateProductSchema,
+  UpdateProductSchema,
+  DeleteProductSchema,
+  GetProductSchema,
+  ListProductsGrpcSchema,
+  UpdateStockSchema,
+} from "@shared/validation/inventory.schema";
 import type { Product } from "@shared/types";
 import {
   findProductById,
@@ -14,7 +31,15 @@ import {
   findProductsByIds,
 } from "../db/product.queries";
 import { findCategoryById } from "../db/category.queries";
-import { uploadProductImage, type ImageType } from "../storage/rustfs.client";
+import {
+  uploadProductImage,
+  deleteProductImage,
+  extFromUrl,
+  extFromMime,
+} from "../storage/rustfs";
+import { ImageType } from "@shared/types";
+
+const SERVICE_NAME = "inventory-service";
 
 function getMeta(call: any, key: string): string | undefined {
   const val = call.metadata?.get(key);
@@ -24,27 +49,23 @@ function getMeta(call: any, key: string): string | undefined {
 export const createProduct = handle(async (call, callback) => {
   const db = getDb();
   const { category_id, name, description, price, stock_quantity } =
-    call.request as any;
-
-  if (!category_id || !name || !price) {
-    throw Errors.invalidArgument("category_id, name, and price are required");
-  }
+    validateGrpc(CreateProductSchema, call.request);
 
   const category = await findCategoryById(db, category_id);
-  if (!category) throw Errors.notFound("Category not found");
+  if (!category) throw new NotFoundError("Category not found");
 
   const product = await insertProduct(db, {
     category_id,
     name,
     description,
     price,
-    stock_quantity: stock_quantity ?? 0,
+    stock_quantity,
   });
 
-  await cacheDel(
-    CacheKey.productList(category_id, 1, 20),
-    CacheKey.productListAll(1, 20)
-  );
+  await Promise.all([
+    cacheDelPattern(CacheKey.productListPattern(category_id)),
+    cacheDelPattern(CacheKey.productListAllPattern()),
+  ]);
 
   await writeAuditLog(db, {
     entity_type: "product",
@@ -55,22 +76,28 @@ export const createProduct = handle(async (call, callback) => {
     ip_address: getMeta(call, "ip_address"),
   });
 
+  logger.info(SERVICE_NAME, "Product created", {
+    product_id: product.id,
+    category_id,
+    name,
+  });
+
   callback(null, { product });
 });
 
 export const updateProduct = handle(async (call, callback) => {
   const db = getDb();
-  const { id, category_id, name, description, price, is_active } =
-    call.request as any;
-
-  if (!id) throw Errors.invalidArgument("id is required");
+  const { id, category_id, name, description, price, is_active } = validateGrpc(
+    UpdateProductSchema,
+    call.request
+  );
 
   const existing = await findProductById(db, id);
-  if (!existing) throw Errors.notFound("Product not found");
+  if (!existing) throw new NotFoundError("Product not found");
 
   if (category_id) {
     const category = await findCategoryById(db, category_id);
-    if (!category) throw Errors.notFound("Category not found");
+    if (!category) throw new NotFoundError("Category not found");
   }
 
   const updated = await updateProductQuery(db, id, {
@@ -81,13 +108,13 @@ export const updateProduct = handle(async (call, callback) => {
     is_active,
   });
 
-  await cacheDel(
-    CacheKey.product(id),
-    CacheKey.productList(existing.category_id, 1, 20),
-    CacheKey.productListAll(1, 20)
-  );
+  await cacheDel(CacheKey.product(id));
+  await Promise.all([
+    cacheDelPattern(CacheKey.productListPattern(existing.category_id)),
+    cacheDelPattern(CacheKey.productListAllPattern()),
+  ]);
   if (category_id && category_id !== existing.category_id) {
-    await cacheDel(CacheKey.productList(category_id, 1, 20));
+    await cacheDelPattern(CacheKey.productListPattern(category_id));
   }
 
   const diff: Record<string, { from: unknown; to: unknown }> = {};
@@ -109,26 +136,26 @@ export const updateProduct = handle(async (call, callback) => {
     ip_address: getMeta(call, "ip_address"),
   });
 
+  logger.info(SERVICE_NAME, "Product updated", { product_id: id, diff });
+
   callback(null, { product: updated });
 });
 
 export const deleteProduct = handle(async (call, callback) => {
   const db = getDb();
-  const { id } = call.request as any;
-
-  if (!id) throw Errors.invalidArgument("id is required");
+  const { id } = validateGrpc(DeleteProductSchema, call.request);
 
   const existing = await findProductById(db, id);
-  if (!existing) throw Errors.notFound("Product not found");
-  if (!existing.is_active) throw Errors.notFound("Product not found");
+  if (!existing) throw new NotFoundError("Product not found");
+  if (!existing.is_active) throw new NotFoundError("Product not found");
 
   await softDeleteProduct(db, id);
 
-  await cacheDel(
-    CacheKey.product(id),
-    CacheKey.productList(existing.category_id, 1, 20),
-    CacheKey.productListAll(1, 20)
-  );
+  await cacheDel(CacheKey.product(id));
+  await Promise.all([
+    cacheDelPattern(CacheKey.productListPattern(existing.category_id)),
+    cacheDelPattern(CacheKey.productListAllPattern()),
+  ]);
 
   await writeAuditLog(db, {
     entity_type: "product",
@@ -139,14 +166,17 @@ export const deleteProduct = handle(async (call, callback) => {
     ip_address: getMeta(call, "ip_address"),
   });
 
+  logger.info(SERVICE_NAME, "Product deleted", {
+    product_id: id,
+    name: existing.name,
+  });
+
   callback(null, { success: true, message: "Product deleted" });
 });
 
 export const getProduct = handle(async (call, callback) => {
   const db = getDb();
-  const { id } = call.request as any;
-
-  if (!id) throw Errors.invalidArgument("id is required");
+  const { id } = validateGrpc(GetProductSchema, call.request);
 
   const cached = await cacheGet<Product>(CacheKey.product(id));
   if (cached) {
@@ -155,7 +185,7 @@ export const getProduct = handle(async (call, callback) => {
   }
 
   const product = await findProductById(db, id);
-  if (!product) throw Errors.notFound("Product not found");
+  if (!product) throw new NotFoundError("Product not found");
 
   await cacheSet(CacheKey.product(id), product, TTL.PRODUCT_DETAIL);
 
@@ -164,10 +194,13 @@ export const getProduct = handle(async (call, callback) => {
 
 export const listProducts = handle(async (call, callback) => {
   const db = getDb();
-  const { category_id, pagination } = call.request as any;
+  const { category_id, pagination } = validateGrpc(
+    ListProductsGrpcSchema,
+    call.request
+  );
 
-  const page = pagination?.page || 1;
-  const limit = pagination?.limit || 20;
+  const page = pagination?.page ?? 1;
+  const limit = pagination?.limit ?? 20;
 
   // All products
   if (!category_id) {
@@ -219,25 +252,57 @@ export const listProducts = handle(async (call, callback) => {
 
 export const updateStock = handle(async (call, callback) => {
   const db = getDb();
-  const { product_id, delta } = call.request as any;
+  const { product_id, delta, reason } = validateGrpc(
+    UpdateStockSchema,
+    call.request
+  );
 
-  if (!product_id) throw Errors.invalidArgument("product_id is required");
-  if (delta === undefined) throw Errors.invalidArgument("delta is required");
+  const existing = await findProductById(db, product_id);
+  if (!existing) throw new NotFoundError("Product not found");
 
   const updated = await updateStockQuantity(db, product_id, delta);
 
   if (!updated) {
-    throw Errors.invalidArgument(
+    logger.warn(SERVICE_NAME, "Stock update rejected: would go negative", {
+      product_id,
+      delta,
+    });
+    throw new BadRequestError(
       "Stock update rejected — quantity cannot go below zero"
     );
   }
 
-  await cacheDel(
-    CacheKey.stock(product_id),
-    CacheKey.product(product_id),
-    CacheKey.productList(updated.category_id, 1, 20),
-    CacheKey.productListAll(1, 20)
-  );
+  await cacheDel(CacheKey.stock(product_id), CacheKey.product(product_id));
+  await Promise.all([
+    cacheDelPattern(CacheKey.productListPattern(updated.category_id)),
+    cacheDelPattern(CacheKey.productListAllPattern()),
+  ]);
+
+  // No prior audit trail existed for stock changes at all (unlike product
+  // create/update/delete) — this was silently unaudited before. Reuses the
+  // generic audit_logs table (action: "update") rather than adding a new
+  // stock_movements table, since entity_type/metadata already model this fine.
+  await writeAuditLog(db, {
+    entity_type: "product",
+    entity_id: product_id,
+    action: "update",
+    performed_by: getMeta(call, "admin_id") ?? "system",
+    metadata: {
+      type: "stock_adjustment",
+      delta,
+      reason: reason ?? null,
+      stock_before: existing.stock_quantity,
+      stock_after: updated.stock_quantity,
+    },
+    ip_address: getMeta(call, "ip_address"),
+  });
+
+  logger.info(SERVICE_NAME, "Stock updated", {
+    product_id,
+    delta,
+    reason,
+    new_quantity: updated.stock_quantity,
+  });
 
   callback(null, {
     product_id,
@@ -276,6 +341,11 @@ export function uploadProductImageHandler(call: any, callback: any): void {
         return;
       }
 
+      const previousUrl =
+        image_type === "thumbnail"
+          ? product.thumbnail_url
+          : product.list_image_url;
+
       const fileBuffer = Buffer.concat(chunks);
       const url = await uploadProductImage(
         product_id,
@@ -288,17 +358,54 @@ export function uploadProductImageHandler(call: any, callback: any): void {
         [image_type === "thumbnail" ? "thumbnail_url" : "list_image_url"]: url,
       });
 
+      // The object key includes the extension (products/{id}/{type}.{ext}),
+      // so re-uploading with a different mime type (e.g. png -> webp)
+      // writes a new object rather than overwriting the old one. Clean up
+      // the orphan — best-effort, doesn't fail the request if it errors.
+      const previousExt = previousUrl ? extFromUrl(previousUrl) : undefined;
+      const newExt = extFromMime(mime_type);
+      if (previousExt && previousExt !== newExt) {
+        await deleteProductImage(product_id, image_type, previousExt).catch(
+          (err) => {
+            logger.error(SERVICE_NAME, "Failed to remove stale product image", {
+              product_id,
+              image_type,
+              previous_url: previousUrl,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        );
+      }
+
       await cacheDel(CacheKey.product(product_id));
+
+      await writeAuditLog(getDb(), {
+        entity_type: "product",
+        entity_id: product_id,
+        action: "update",
+        performed_by: getMeta(call, "admin_id") ?? "system",
+        metadata: { image_type, url },
+        ip_address: getMeta(call, "ip_address"),
+      });
+      
+      logger.info(SERVICE_NAME, "Product image uploaded", {
+        product_id,
+        image_type,
+      });
 
       callback(null, { url });
     } catch (err) {
-      console.error("[inventory] image upload error:", err);
+      logger.error(SERVICE_NAME, "Image upload error", {
+        error: err instanceof Error ? err.message : String(err),
+      });
       callback({ code: 13, message: "Internal server error" }, null);
     }
   });
 
   call.on("error", (err: Error) => {
-    console.error("[inventory] stream error:", err);
+    logger.error(SERVICE_NAME, "Image upload stream error", {
+      error: err.message,
+    });
   });
 }
 

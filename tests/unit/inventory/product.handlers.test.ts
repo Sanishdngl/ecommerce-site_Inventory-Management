@@ -1,48 +1,47 @@
-import * as grpc from "@grpc/grpc-js";
-
 const mockExecute = jest.fn();
 const mockCacheGet = jest.fn();
 const mockCacheSet = jest.fn();
 const mockCacheDel = jest.fn();
+const mockCacheDelPattern = jest.fn();
 
-jest.mock("@shared/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
-jest.mock("@shared/audit", () => ({
+jest.mock("@infrastructure/database/mysql", () => ({
+  getDb: () => ({ execute: mockExecute }),
+}));
+jest.mock("@infrastructure/observability/audit", () => ({
   writeAuditLog: jest.fn().mockResolvedValue(undefined),
 }));
-jest.mock("@shared/redis", () => ({
+jest.mock("@infrastructure/redis/redis", () => ({
   cacheGet: (...args: any[]) => mockCacheGet(...args),
   cacheSet: (...args: any[]) => mockCacheSet(...args),
   cacheDel: (...args: any[]) => mockCacheDel(...args),
+  cacheDelPattern: (...args: any[]) => mockCacheDelPattern(...args),
   TTL: { PRODUCT_DETAIL: 600, PRODUCT_LIST: 300, STOCK: 60 },
   CacheKey: {
     product: (id: string) => `product:${id}`,
-    productList: (id: string) => `products:list:${id}`,
     stock: (id: string) => `stock:${id}`,
+    productListPattern: (id: string) => `products:list:${id}:1:*`,
+    productListAllPattern: () => `products:list:all:1:*`,
   },
 }));
 jest.mock("@shared/errors", () => {
   const actual = jest.requireActual("@shared/errors");
   return { ...actual, handle: (fn: any) => fn };
 });
-jest.mock(
-  "../../../services/inventory-service/src/storage/rustfs.client",
-  () => ({
-    uploadProductImage: jest
-      .fn()
-      .mockResolvedValue("http://rustfs/products/prod-1/thumbnail.jpg"),
-  })
-);
+jest.mock("../../../services/inventory-service/src/storage/rustfs", () => ({
+  uploadProductImage: jest
+    .fn()
+    .mockResolvedValue("http://rustfs/products/prod-1/thumbnail.jpg"),
+}));
 
 import {
   createProduct,
   updateProduct,
   deleteProduct,
   getProduct,
-  listProducts,
   updateStock,
   getProductsByIds,
 } from "../../../services/inventory-service/src/handlers/product.handlers";
-import { writeAuditLog } from "@shared/audit";
+import { writeAuditLog } from "../../../infrastructure/observability/audit";
 
 function makeCall(request: any, meta: Record<string, string> = {}): any {
   return {
@@ -53,8 +52,8 @@ function makeCall(request: any, meta: Record<string, string> = {}): any {
 
 function makeProduct(overrides: any = {}): any {
   return {
-    id: "prod-1",
-    category_id: "cat-1",
+    id: "22222222-2222-4222-8222-222222222222",
+    category_id: "11111111-1111-4111-8111-111111111111",
     name: "T-Shirt",
     description: null,
     price: "19.99",
@@ -69,7 +68,11 @@ function makeProduct(overrides: any = {}): any {
 }
 
 function makeCategory(): any {
-  return { id: "cat-1", name: "Shirts", slug: "shirts" };
+  return {
+    id: "11111111-1111-4111-8111-111111111111",
+    name: "Shirts",
+    slug: "shirts",
+  };
 }
 
 describe("createProduct", () => {
@@ -82,14 +85,15 @@ describe("createProduct", () => {
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // insert
       .mockResolvedValueOnce([[product]]); // findById
 
-    mockCacheDel.mockResolvedValue(undefined);
+    mockCacheDelPattern.mockResolvedValue(undefined);
 
     const callback = jest.fn();
     await createProduct(
       makeCall(
         {
-          category_id: "cat-1",
+          category_id: "11111111-1111-4111-8111-111111111111",
           name: "T-Shirt",
+          description: "",
           price: "19.99",
           stock_quantity: 10,
         },
@@ -104,7 +108,10 @@ describe("createProduct", () => {
         product: expect.objectContaining({ name: "T-Shirt" }),
       })
     );
-    expect(mockCacheDel).toHaveBeenCalledWith("products:list:cat-1");
+    expect(mockCacheDelPattern).toHaveBeenCalledWith(
+      "products:list:11111111-1111-4111-8111-111111111111:1:*"
+    );
+    expect(mockCacheDelPattern).toHaveBeenCalledWith("products:list:all:1:*");
     expect(writeAuditLog).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: "create", entity_type: "product" })
@@ -115,7 +122,7 @@ describe("createProduct", () => {
     const callback = jest.fn();
     await expect(
       createProduct(makeCall({ name: "T-Shirt" }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws NOT_FOUND when category does not exist", async () => {
@@ -124,10 +131,16 @@ describe("createProduct", () => {
     const callback = jest.fn();
     await expect(
       createProduct(
-        makeCall({ category_id: "ghost", name: "T-Shirt", price: "19.99" }),
+        makeCall({
+          category_id: "00000000-0000-4000-8000-000000000000",
+          name: "T-Shirt",
+          description: "",
+          price: "19.99",
+          stock_quantity: 10,
+        }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.NOT_FOUND });
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 
@@ -143,20 +156,28 @@ describe("updateProduct", () => {
       .mockResolvedValueOnce([[updated]]); // findById after update
 
     mockCacheDel.mockResolvedValue(undefined);
+    mockCacheDelPattern.mockResolvedValue(undefined);
 
     const callback = jest.fn();
     await updateProduct(
       makeCall(
-        { id: "prod-1", name: "Updated Shirt", price: "24.99" },
+        {
+          id: "22222222-2222-4222-8222-222222222222",
+          name: "Updated Shirt",
+          price: "24.99",
+        },
         { admin_id: "a1" }
       ),
       callback
     );
 
     expect(mockCacheDel).toHaveBeenCalledWith(
-      "product:prod-1",
-      "products:list:cat-1"
+      "product:22222222-2222-4222-8222-222222222222"
     );
+    expect(mockCacheDelPattern).toHaveBeenCalledWith(
+      "products:list:11111111-1111-4111-8111-111111111111:1:*"
+    );
+    expect(mockCacheDelPattern).toHaveBeenCalledWith("products:list:all:1:*");
     expect(writeAuditLog).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -170,7 +191,7 @@ describe("updateProduct", () => {
     const callback = jest.fn();
     await expect(
       updateProduct(makeCall({ name: "New Name" }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws NOT_FOUND when product does not exist", async () => {
@@ -178,13 +199,20 @@ describe("updateProduct", () => {
 
     const callback = jest.fn();
     await expect(
-      updateProduct(makeCall({ id: "ghost", name: "X" }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.NOT_FOUND });
+      updateProduct(
+        makeCall({ id: "00000000-0000-4000-8000-000000000000", name: "X" }),
+        callback
+      )
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("invalidates new category list when category changes", async () => {
-    const existing = makeProduct({ category_id: "cat-1" });
-    const updated = makeProduct({ category_id: "cat-2" });
+    const existing = makeProduct({
+      category_id: "11111111-1111-4111-8111-111111111111",
+    });
+    const updated = makeProduct({
+      category_id: "44444444-4444-4444-8444-444444444444",
+    });
     mockExecute
       .mockResolvedValueOnce([[existing]])
       .mockResolvedValueOnce([[makeCategory()]]) // findCategoryById new category
@@ -192,14 +220,23 @@ describe("updateProduct", () => {
       .mockResolvedValueOnce([[updated]]);
 
     mockCacheDel.mockResolvedValue(undefined);
+    mockCacheDelPattern.mockResolvedValue(undefined);
 
     const callback = jest.fn();
     await updateProduct(
-      makeCall({ id: "prod-1", category_id: "cat-2" }, { admin_id: "a1" }),
+      makeCall(
+        {
+          id: "22222222-2222-4222-8222-222222222222",
+          category_id: "44444444-4444-4444-8444-444444444444",
+        },
+        { admin_id: "a1" }
+      ),
       callback
     );
 
-    expect(mockCacheDel).toHaveBeenCalledWith("products:list:cat-2");
+    expect(mockCacheDelPattern).toHaveBeenCalledWith(
+      "products:list:44444444-4444-4444-8444-444444444444:1:*"
+    );
   });
 });
 
@@ -213,10 +250,14 @@ describe("deleteProduct", () => {
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
 
     mockCacheDel.mockResolvedValue(undefined);
+    mockCacheDelPattern.mockResolvedValue(undefined);
 
     const callback = jest.fn();
     await deleteProduct(
-      makeCall({ id: "prod-1" }, { admin_id: "a1" }),
+      makeCall(
+        { id: "22222222-2222-4222-8222-222222222222" },
+        { admin_id: "a1" }
+      ),
       callback
     );
 
@@ -225,9 +266,12 @@ describe("deleteProduct", () => {
       expect.objectContaining({ success: true })
     );
     expect(mockCacheDel).toHaveBeenCalledWith(
-      "product:prod-1",
-      "products:list:cat-1"
+      "product:22222222-2222-4222-8222-222222222222"
     );
+    expect(mockCacheDelPattern).toHaveBeenCalledWith(
+      "products:list:11111111-1111-4111-8111-111111111111:1:*"
+    );
+    expect(mockCacheDelPattern).toHaveBeenCalledWith("products:list:all:1:*");
     expect(writeAuditLog).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: "delete" })
@@ -239,8 +283,11 @@ describe("deleteProduct", () => {
 
     const callback = jest.fn();
     await expect(
-      deleteProduct(makeCall({ id: "ghost" }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.NOT_FOUND });
+      deleteProduct(
+        makeCall({ id: "00000000-0000-4000-8000-000000000000" }),
+        callback
+      )
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 
@@ -252,7 +299,10 @@ describe("getProduct", () => {
     mockCacheGet.mockResolvedValueOnce(cached);
 
     const callback = jest.fn();
-    await getProduct(makeCall({ id: "prod-1" }), callback);
+    await getProduct(
+      makeCall({ id: "22222222-2222-4222-8222-222222222222" }),
+      callback
+    );
 
     expect(callback).toHaveBeenCalledWith(null, { product: cached });
     expect(mockExecute).not.toHaveBeenCalled();
@@ -265,10 +315,17 @@ describe("getProduct", () => {
     mockCacheSet.mockResolvedValue(undefined);
 
     const callback = jest.fn();
-    await getProduct(makeCall({ id: "prod-1" }), callback);
+    await getProduct(
+      makeCall({ id: "22222222-2222-4222-8222-222222222222" }),
+      callback
+    );
 
     expect(callback).toHaveBeenCalledWith(null, { product });
-    expect(mockCacheSet).toHaveBeenCalledWith("product:prod-1", product, 600);
+    expect(mockCacheSet).toHaveBeenCalledWith(
+      "product:22222222-2222-4222-8222-222222222222",
+      product,
+      600
+    );
   });
 
   it("throws NOT_FOUND when product does not exist", async () => {
@@ -277,8 +334,11 @@ describe("getProduct", () => {
 
     const callback = jest.fn();
     await expect(
-      getProduct(makeCall({ id: "ghost" }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.NOT_FOUND });
+      getProduct(
+        makeCall({ id: "00000000-0000-4000-8000-000000000000" }),
+        callback
+      )
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 
@@ -286,40 +346,99 @@ describe("updateStock", () => {
   beforeEach(() => jest.clearAllMocks());
 
   it("increments stock and invalidates stock cache", async () => {
+    const existing = makeProduct({ stock_quantity: 10 });
     const updated = makeProduct({ stock_quantity: 15 });
     mockExecute
+      .mockResolvedValueOnce([[existing]]) // findProductById (existing, for audit stock_before)
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // atomic update
       .mockResolvedValueOnce([[updated]]); // findById
 
     mockCacheDel.mockResolvedValue(undefined);
+    mockCacheDelPattern.mockResolvedValue(undefined);
 
     const callback = jest.fn();
-    await updateStock(makeCall({ product_id: "prod-1", delta: 5 }), callback);
+    await updateStock(
+      makeCall({
+        product_id: "22222222-2222-4222-8222-222222222222",
+        delta: 5,
+      }),
+      callback
+    );
 
     expect(callback).toHaveBeenCalledWith(
       null,
       expect.objectContaining({
-        product_id: "prod-1",
+        product_id: "22222222-2222-4222-8222-222222222222",
         stock_quantity: 15,
       })
     );
-    expect(mockCacheDel).toHaveBeenCalledWith("stock:prod-1");
+    expect(mockCacheDel).toHaveBeenCalledWith(
+      "stock:22222222-2222-4222-8222-222222222222",
+      "product:22222222-2222-4222-8222-222222222222"
+    );
+  });
+
+  it("writes an audit log entry with delta, reason, and before/after quantities", async () => {
+    const existing = makeProduct({ stock_quantity: 10 });
+    const updated = makeProduct({ stock_quantity: 15 });
+    mockExecute
+      .mockResolvedValueOnce([[existing]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([[updated]]);
+
+    mockCacheDel.mockResolvedValue(undefined);
+    mockCacheDelPattern.mockResolvedValue(undefined);
+
+    const callback = jest.fn();
+    await updateStock(
+      makeCall({
+        product_id: "22222222-2222-4222-8222-222222222222",
+        delta: 5,
+        reason: "Restock from supplier",
+      }),
+      callback
+    );
+
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        entity_type: "product",
+        entity_id: "22222222-2222-4222-8222-222222222222",
+        action: "update",
+        metadata: expect.objectContaining({
+          type: "stock_adjustment",
+          delta: 5,
+          reason: "Restock from supplier",
+          stock_before: 10,
+          stock_after: 15,
+        }),
+      })
+    );
   });
 
   it("throws INVALID_ARGUMENT when stock would go below zero", async () => {
-    mockExecute.mockResolvedValueOnce([{ affectedRows: 0 }]);
+    const existing = makeProduct({ stock_quantity: 10 });
+    mockExecute
+      .mockResolvedValueOnce([[existing]]) // findProductById
+      .mockResolvedValueOnce([{ affectedRows: 0 }]); // atomic update rejected
 
     const callback = jest.fn();
     await expect(
-      updateStock(makeCall({ product_id: "prod-1", delta: -999 }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+      updateStock(
+        makeCall({
+          product_id: "22222222-2222-4222-8222-222222222222",
+          delta: -999,
+        }),
+        callback
+      )
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws INVALID_ARGUMENT when product_id missing", async () => {
     const callback = jest.fn();
     await expect(
       updateStock(makeCall({ delta: 5 }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
 
@@ -329,12 +448,23 @@ describe("getProductsByIds", () => {
   it("returns products for given ids", async () => {
     const products = [
       makeProduct(),
-      makeProduct({ id: "prod-2", name: "Socks" }),
+      makeProduct({
+        id: "33333333-3333-4333-8333-333333333333",
+        name: "Socks",
+      }),
     ];
     mockExecute.mockResolvedValueOnce([products]);
 
     const callback = jest.fn();
-    await getProductsByIds(makeCall({ ids: ["prod-1", "prod-2"] }), callback);
+    await getProductsByIds(
+      makeCall({
+        ids: [
+          "22222222-2222-4222-8222-222222222222",
+          "33333333-3333-4333-8333-333333333333",
+        ],
+      }),
+      callback
+    );
 
     expect(callback).toHaveBeenCalledWith(null, { products });
   });

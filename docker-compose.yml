@@ -1,11 +1,17 @@
 services:
   mysql:
-    image: mysql:8
+    image: mysql:8.4
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME}
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASSWORD}
+    command:
+      - --binlog-format=ROW
+      - --binlog-row-image=FULL
+      - --log-bin=mysql-bin
+      - --server-id=1
+      - --binlog_expire_logs_seconds=604800
     ports:
       - "3306:3306"
     volumes:
@@ -29,7 +35,7 @@ services:
       - ecommerce
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     ports:
       - "6379:6379"
     healthcheck:
@@ -50,10 +56,29 @@ services:
     volumes:
       - rustfs_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - ecommerce
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - ecommerce
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./infrastructure/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
     networks:
       - ecommerce
 
@@ -70,6 +95,9 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       INVENTORY_SERVICE_HOST: inventory-service
       INVENTORY_SERVICE_PORT: ${INVENTORY_SERVICE_PORT}
+      SERVICE_NAME: admin-service
+      TRACING_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
     depends_on:
       mysql:
         condition: service_healthy
@@ -96,6 +124,9 @@ services:
       RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
       RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
       RUSTFS_BUCKET: ${RUSTFS_BUCKET}
+      SERVICE_NAME: inventory-service
+      TRACING_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
     depends_on:
       mysql:
         condition: service_healthy
@@ -124,6 +155,9 @@ services:
       OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID}
       INVENTORY_SERVICE_HOST: inventory-service
       INVENTORY_SERVICE_PORT: ${INVENTORY_SERVICE_PORT}
+      SERVICE_NAME: customer-service
+      TRACING_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
     depends_on:
       mysql:
         condition: service_healthy
@@ -152,6 +186,9 @@ services:
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
       JWT_EXPIRES_IN_ADMIN: ${JWT_EXPIRES_IN_ADMIN}
       JWT_EXPIRES_IN_CUSTOMER: ${JWT_EXPIRES_IN_CUSTOMER}
+      SERVICE_NAME: gateway
+      TRACING_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "${GATEWAY_PORT}:${GATEWAY_PORT}"
     depends_on:

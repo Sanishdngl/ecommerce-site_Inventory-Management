@@ -1,5 +1,5 @@
 import type mysql from "mysql2/promise";
-import { v4 as uuidv4 } from "uuid";
+import { generateId } from "@shared/utils/uuid";
 
 export async function upsertCartItem(
   db: mysql.Pool,
@@ -13,7 +13,7 @@ export async function upsertCartItem(
      ON DUPLICATE KEY UPDATE
        quantity   = quantity + VALUES(quantity),
        updated_at = NOW()`,
-    [uuidv4(), customerId, productId, quantity]
+    [generateId(), customerId, productId, quantity]
   );
 }
 

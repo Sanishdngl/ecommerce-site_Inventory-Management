@@ -1,8 +1,19 @@
-import { getDb } from "@shared/db";
-import { hashPassword, verifyPassword } from "@shared/password";
-import { Errors, handle } from "@shared/errors";
-import { cacheSet, cacheGet, cacheDel, TTL, CacheKey } from "@shared/redis";
-import { generateRefreshToken, parseRefreshToken } from "@shared/jwt";
+import { getDb } from "@infrastructure/database/mysql";
+import { hashPassword, verifyPassword } from "@shared/auth/password";
+import { handle, ConflictError, UnauthorizedError } from "@shared/errors";
+import { cacheSet, cacheDel, TTL, CacheKey } from "@infrastructure/redis/redis";
+import { logger } from "@infrastructure/observability/logger";
+import {
+  generateRefreshToken,
+  parseRefreshToken,
+} from "@shared/auth/refresh-token";
+import { rotateRefreshToken } from "@shared/auth/rotate-refresh-token";
+import { validateGrpc } from "@shared/grpc/validate-grpc";
+import {
+  RegisterSchema,
+  LoginSchema,
+  OAuthSchema,
+} from "@shared/validation/customer.schema";
 import type { RefreshTokenPayload } from "@shared/types";
 import {
   findCustomerById,
@@ -11,6 +22,8 @@ import {
   insertCustomer,
 } from "../db/customer.queries";
 import { verifyOAuthToken } from "../auth/oauth";
+
+const SERVICE_NAME = "customer-service";
 
 function sanitizeCustomer(customer: any) {
   const { password_hash, ...safe } = customer;
@@ -44,22 +57,10 @@ export const registerCustomer = handle(async (call, callback) => {
     last_name,
     device_id,
     device_pixel_ratio,
-  } = call.request as any;
-
-  if (!email || !password || !first_name || !last_name) {
-    throw Errors.invalidArgument(
-      "email, password, first_name, and last_name are required"
-    );
-  }
-
-  if (!device_id) throw Errors.invalidArgument("device_id is required");
-
-  if (password.length < 8) {
-    throw Errors.invalidArgument("Password must be at least 8 characters");
-  }
+  } = validateGrpc(RegisterSchema, call.request);
 
   const existing = await findCustomerByEmail(db, email);
-  if (existing) throw Errors.alreadyExists("Email already registered");
+  if (existing) throw new ConflictError("Email already registered");
 
   const password_hash = await hashPassword(password);
   const customer = await insertCustomer(db, {
@@ -77,6 +78,11 @@ export const registerCustomer = handle(async (call, callback) => {
     device_pixel_ratio ?? 1
   );
 
+  logger.info(SERVICE_NAME, "Customer registered", {
+    customer_id: customer.id,
+    email,
+  });
+
   callback(null, {
     customer: sanitizeCustomer(customer),
     refresh_token: refreshToken,
@@ -85,29 +91,40 @@ export const registerCustomer = handle(async (call, callback) => {
 
 export const loginCustomer = handle(async (call, callback) => {
   const db = getDb();
-  const { email, password, device_id, device_pixel_ratio } =
-    call.request as any;
-
-  if (!email || !password) {
-    throw Errors.invalidArgument("email and password are required");
-  }
-
-  if (!device_id) throw Errors.invalidArgument("device_id is required");
+  const { email, password, device_id, device_pixel_ratio } = validateGrpc(
+    LoginSchema,
+    call.request
+  );
 
   const customer = await findCustomerByEmail(db, email);
 
   if (!customer || !customer.is_active || !customer.password_hash) {
-    throw Errors.unauthenticated("Invalid credentials");
+    logger.warn(SERVICE_NAME, "Customer login failed: unknown or inactive account", {
+      email,
+    });
+    throw new UnauthorizedError("Invalid credentials");
   }
 
   const valid = await verifyPassword(password, customer.password_hash);
-  if (!valid) throw Errors.unauthenticated("Invalid credentials");
+  if (!valid) {
+    logger.warn(SERVICE_NAME, "Customer login failed: bad password", {
+      customer_id: customer.id,
+      email,
+    });
+    throw new UnauthorizedError("Invalid credentials");
+  }
 
   const refreshToken = await issueRefreshToken(
     customer.id,
     device_id,
     device_pixel_ratio ?? 1
   );
+
+  logger.info(SERVICE_NAME, "Customer logged in", {
+    customer_id: customer.id,
+    email,
+    device_id,
+  });
 
   callback(null, {
     customer: sanitizeCustomer(customer),
@@ -117,20 +134,20 @@ export const loginCustomer = handle(async (call, callback) => {
 
 export const oAuthLogin = handle(async (call, callback) => {
   const db = getDb();
-  const { provider, token, device_id, device_pixel_ratio } =
-    call.request as any;
-
-  if (!provider || !token) {
-    throw Errors.invalidArgument("provider and token are required");
-  }
-
-  if (!device_id) throw Errors.invalidArgument("device_id is required");
+  const { provider, token, device_id, device_pixel_ratio } = validateGrpc(
+    OAuthSchema,
+    call.request
+  );
 
   let profile;
   try {
     profile = await verifyOAuthToken(provider, token);
   } catch (err: any) {
-    throw Errors.unauthenticated(err.message ?? "OAuth verification failed");
+    logger.warn(SERVICE_NAME, "OAuth verification failed", {
+      provider,
+      error: err.message,
+    });
+    throw new UnauthorizedError(err.message ?? "OAuth verification failed");
   }
 
   let customer = await findCustomerByOAuth(
@@ -156,7 +173,10 @@ export const oAuthLogin = handle(async (call, callback) => {
   }
 
   if (!customer.is_active) {
-    throw Errors.unauthenticated("Account is deactivated");
+    logger.warn(SERVICE_NAME, "OAuth login blocked: account deactivated", {
+      customer_id: customer.id,
+    });
+    throw new UnauthorizedError("Account is deactivated");
   }
 
   const refreshToken = await issueRefreshToken(
@@ -164,6 +184,11 @@ export const oAuthLogin = handle(async (call, callback) => {
     device_id,
     device_pixel_ratio ?? 1
   );
+
+  logger.info(SERVICE_NAME, "Customer logged in via OAuth", {
+    customer_id: customer.id,
+    provider,
+  });
 
   callback(null, {
     customer: sanitizeCustomer(customer),
@@ -188,65 +213,20 @@ export const logoutCustomer = handle(async (call, callback) => {
 
 export const refreshCustomerToken = handle(async (call, callback) => {
   const { refresh_token } = call.request as any;
-  if (!refresh_token) {
-    throw Errors.invalidArgument("refresh_token is required");
-  }
-
-  const parsed = parseRefreshToken(refresh_token);
-  if (!parsed) throw Errors.unauthenticated("Refresh token malformed");
-
-  const { userId: customer_id, deviceId: device_id } = parsed;
-  const key = CacheKey.refreshCustomer(customer_id, device_id);
-  const raw = await cacheGet<string>(key);
-  if (!raw) {
-    throw Errors.unauthenticated("Refresh token invalid or expired");
-  }
-
-  // token matches just rotated previous token
-  const stored: RefreshTokenPayload = JSON.parse(raw as any);
-  const isCurrent = stored.token === refresh_token;
-  const isPrevious =
-    stored.previous_token === refresh_token &&
-    stored.previous_token_expires_at &&
-    Date.now() < stored.previous_token_expires_at;
-
-  if (!isCurrent && !isPrevious) {
-    throw Errors.unauthenticated("Refresh token already rotated");
-  }
-
   const db = getDb();
-  const customer = await findCustomerById(db, customer_id);
 
-  if (!customer || !customer.is_active) {
-    await cacheDel(key);
-    throw Errors.unauthenticated("Customer account not found or deactivated");
-  }
-
-  // avoid rotation chain
-  if (isPrevious) {
-    callback(null, {
-      customer_id,
-      refresh_token: stored.token,
-      customer: sanitizeCustomer(customer),
-    });
-    return;
-  }
-
-  // noramal rotation
-  const newRefreshToken = generateRefreshToken(customer_id, device_id);
-  const newPayload: RefreshTokenPayload = {
-    token: newRefreshToken,
-    previous_token: stored.token,
-    previous_token_expires_at: Date.now() + TTL.REFRESH_GRACE_PERIOD * 1000,
-    device_pixel_ratio: stored.device_pixel_ratio,
-    created_at: new Date().toISOString(),
-  };
-
-  await cacheSet(key, JSON.stringify(newPayload), TTL.REFRESH_TOKEN_CUSTOMER);
+  const result = await rotateRefreshToken({
+    refreshToken: refresh_token,
+    cacheKey: CacheKey.refreshCustomer,
+    ttlSeconds: TTL.REFRESH_TOKEN_CUSTOMER,
+    gracePeriodSeconds: TTL.REFRESH_GRACE_PERIOD,
+    findUser: (id) => findCustomerById(db, id),
+    isActive: (customer) => customer.is_active,
+  });
 
   callback(null, {
-    customer_id,
-    refresh_token: newRefreshToken,
-    customer: sanitizeCustomer(customer),
+    customer_id: result.userId,
+    refresh_token: result.refreshToken,
+    customer: sanitizeCustomer(result.user),
   });
 });

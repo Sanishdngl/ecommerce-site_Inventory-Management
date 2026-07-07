@@ -1,5 +1,6 @@
 import type mysql from "mysql2/promise";
-import { v4 as uuidv4 } from "uuid";
+import { generateId } from "@shared/utils/uuid";
+import { clampPagination } from "@shared/utils/pagination";
 import type { Product } from "@shared/types";
 
 export async function findProductById(
@@ -23,7 +24,7 @@ export async function insertProduct(
     stock_quantity: number;
   }
 ): Promise<Product> {
-  const id = uuidv4();
+  const id = generateId();
   const now = new Date();
 
   await db.execute(
@@ -123,8 +124,7 @@ export async function listAllProducts(
   page: number,
   limit: number
 ): Promise<{ products: Product[]; total: number }> {
-  const safeLimit = Math.max(1, parseInt(String(limit), 10));
-  const safeOffset = Math.max(0, parseInt(String((page - 1) * limit), 10));
+  const { safeLimit, safeOffset } = clampPagination(page, limit);
 
   const [rows] = await db.execute<any[]>(
     `SELECT * FROM products
@@ -146,8 +146,7 @@ export async function listProductsByCategory(
   page: number,
   limit: number
 ): Promise<{ products: Product[]; total: number }> {
-  const safeLimit = Math.max(1, parseInt(String(limit), 10));
-  const safeOffset = Math.max(0, parseInt(String((page - 1) * limit), 10));
+  const { safeLimit, safeOffset } = clampPagination(page, limit);
 
   const [rows] = await db.execute<any[]>(
     `SELECT * FROM products
@@ -182,6 +181,25 @@ export async function updateStockQuantity(
 
   if (result.affectedRows === 0) return null;
   return findProductById(db, productId);
+}
+
+export async function countActiveProducts(db: mysql.Pool): Promise<number> {
+  const [[{ total }]] = await db.execute<any[]>(
+    `SELECT COUNT(*) as total FROM products WHERE is_active = true`
+  );
+  return Number(total);
+}
+
+export async function countLowStockProducts(
+  db: mysql.Pool,
+  threshold: number
+): Promise<number> {
+  const [[{ total }]] = await db.execute<any[]>(
+    `SELECT COUNT(*) as total FROM products
+     WHERE is_active = true AND stock_quantity <= ?`,
+    [threshold]
+  );
+  return Number(total);
 }
 
 export async function findProductsByIds(

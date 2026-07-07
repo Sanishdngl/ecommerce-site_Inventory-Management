@@ -1,68 +1,88 @@
 import * as grpc from "@grpc/grpc-js";
 import {
   ServiceError,
-  Errors,
+  BadRequestError,
+  UnauthorizedError,
+  ForbiddenError,
+  NotFoundError,
+  ConflictError,
+  toGrpcError,
   grpcToHttp,
   handle,
 } from "../../../shared/src/errors";
 
 describe("ServiceError", () => {
-  it("carries the correct gRPC code and message", () => {
-    const err = new ServiceError(grpc.status.NOT_FOUND, "not found");
-    expect(err.code).toBe(grpc.status.NOT_FOUND);
+  it("carries the given message and code", () => {
+    const err = new ServiceError("not found", "NOT_FOUND");
+    expect(err.code).toBe("NOT_FOUND");
     expect(err.message).toBe("not found");
     expect(err.name).toBe("ServiceError");
   });
+
+  it("defaults to INTERNAL when no code is given", () => {
+    const err = new ServiceError("boom");
+    expect(err.code).toBe("INTERNAL");
+  });
 });
 
-describe("Errors constructors", () => {
-  it("notFound produces NOT_FOUND code", () => {
-    expect(Errors.notFound("x").code).toBe(grpc.status.NOT_FOUND);
+describe("toGrpcError", () => {
+  it("maps NotFoundError to NOT_FOUND", () => {
+    expect(toGrpcError(new NotFoundError("x")).code).toBe(
+      grpc.status.NOT_FOUND
+    );
   });
-  it("invalidArgument produces INVALID_ARGUMENT code", () => {
-    expect(Errors.invalidArgument("x").code).toBe(grpc.status.INVALID_ARGUMENT);
+  it("maps BadRequestError to INVALID_ARGUMENT", () => {
+    expect(toGrpcError(new BadRequestError("x")).code).toBe(
+      grpc.status.INVALID_ARGUMENT
+    );
   });
-  it("permissionDenied produces PERMISSION_DENIED code", () => {
-    expect(Errors.permissionDenied("x").code).toBe(
+  it("maps ForbiddenError to PERMISSION_DENIED", () => {
+    expect(toGrpcError(new ForbiddenError("x")).code).toBe(
       grpc.status.PERMISSION_DENIED
     );
   });
-  it("alreadyExists produces ALREADY_EXISTS code", () => {
-    expect(Errors.alreadyExists("x").code).toBe(grpc.status.ALREADY_EXISTS);
+  it("maps ConflictError to ALREADY_EXISTS", () => {
+    expect(toGrpcError(new ConflictError("x")).code).toBe(
+      grpc.status.ALREADY_EXISTS
+    );
   });
-  it("unauthenticated produces UNAUTHENTICATED code", () => {
-    expect(Errors.unauthenticated("x").code).toBe(grpc.status.UNAUTHENTICATED);
+  it("maps UnauthorizedError to UNAUTHENTICATED", () => {
+    expect(toGrpcError(new UnauthorizedError("x")).code).toBe(
+      grpc.status.UNAUTHENTICATED
+    );
   });
-  it("internal produces INTERNAL code", () => {
-    expect(Errors.internal("x").code).toBe(grpc.status.INTERNAL);
+  it("maps non-AppError instances to INTERNAL", () => {
+    expect(toGrpcError(new Error("unexpected")).code).toBe(
+      grpc.status.INTERNAL
+    );
   });
 });
 
 describe("grpcToHttp", () => {
-  it("maps NOT_FOUND → 404", () => {
+  it("maps NOT_FOUND to 404", () => {
     expect(grpcToHttp[grpc.status.NOT_FOUND]).toBe(404);
   });
-  it("maps INVALID_ARGUMENT → 400", () => {
+  it("maps INVALID_ARGUMENT to 400", () => {
     expect(grpcToHttp[grpc.status.INVALID_ARGUMENT]).toBe(400);
   });
-  it("maps PERMISSION_DENIED → 403", () => {
+  it("maps PERMISSION_DENIED to 403", () => {
     expect(grpcToHttp[grpc.status.PERMISSION_DENIED]).toBe(403);
   });
-  it("maps UNAUTHENTICATED → 401", () => {
+  it("maps UNAUTHENTICATED to 401", () => {
     expect(grpcToHttp[grpc.status.UNAUTHENTICATED]).toBe(401);
   });
-  it("maps ALREADY_EXISTS → 409", () => {
+  it("maps ALREADY_EXISTS to 409", () => {
     expect(grpcToHttp[grpc.status.ALREADY_EXISTS]).toBe(409);
   });
-  it("maps INTERNAL → 500", () => {
+  it("maps INTERNAL to 500", () => {
     expect(grpcToHttp[grpc.status.INTERNAL]).toBe(500);
   });
 });
 
 describe("handle wrapper", () => {
-  it("calls callback with ServiceError when thrown", async () => {
+  it("calls callback with the mapped gRPC code when an AppError is thrown", async () => {
     const handler = handle(async (_call, _callback) => {
-      throw Errors.notFound("item missing");
+      throw new NotFoundError("item missing");
     });
 
     const callback = jest.fn();
@@ -74,7 +94,7 @@ describe("handle wrapper", () => {
     );
   });
 
-  it("calls callback with INTERNAL on unknown error", async () => {
+  it("calls callback with INTERNAL on an unknown error", async () => {
     const consoleSpy = jest
       .spyOn(console, "error")
       .mockImplementation(() => {});

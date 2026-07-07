@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { getCustomerClient } from "../grpc-clients/customer.client";
-import { callGrpc } from "../grpc-clients/index";
+import { callGrpc } from "@shared/grpc/call-grpc";
 
 export async function listCategories(
   req: Request,
@@ -27,8 +27,8 @@ export async function listProducts(
 ): Promise<void> {
   try {
     const { category } = req.query;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const page = (req.query.page as number | undefined) ?? 1;
+    const limit = (req.query.limit as number | undefined) ?? 20;
 
     const customerClient = getCustomerClient();
 

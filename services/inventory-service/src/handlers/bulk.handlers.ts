@@ -1,21 +1,24 @@
-import { v4 as uuidv4 } from "uuid";
-import { getDb } from "@shared/db";
-import { cacheDel, CacheKey } from "@shared/redis";
-import { writeAuditLog } from "@shared/audit";
+import { generateId } from "@shared/utils/uuid";
+import { getDb } from "@infrastructure/database/mysql";
 import {
-  parseProductExcel,
-  type ParsedProductRow,
-  type RowError,
-} from "../excel/parser";
+  cacheDel,
+  cacheDelPattern,
+  CacheKey,
+} from "@infrastructure/redis/redis";
+import { writeAuditLog } from "@infrastructure/observability/audit";
+import { logger } from "@infrastructure/observability/logger";
+import { parseProductExcel } from "../excel/parser";
 import { findCategoryBySlug } from "../db/category.queries";
 import { insertProduct } from "../db/product.queries";
-import { uploadProductImage, type ImageType } from "../storage/rustfs.client";
+import { uploadProductImage } from "../storage/rustfs";
+import {
+  ImageType,
+  ImageFile,
+  ParsedProductRow,
+  RowError,
+} from "@shared/types";
 
-interface ImageFile {
-  filename: string;
-  data: Buffer;
-  mime_type: string;
-}
+const SERVICE_NAME = "inventory-service";
 
 export function bulkUploadProductsHandler(call: any, callback: any): void {
   let excelBuffer: Buffer | null = null;
@@ -124,6 +127,10 @@ export function bulkUploadProductsHandler(call: any, callback: any): void {
 
           successCount++;
         } catch (err) {
+          logger.warn(SERVICE_NAME, "Bulk upload row insert failed", {
+            row: row.rowNumber,
+            error: (err as Error).message,
+          });
           rowErrors.push({
             row: row.rowNumber,
             message: `Insert failed: ${(err as Error).message}`,
@@ -131,28 +138,35 @@ export function bulkUploadProductsHandler(call: any, callback: any): void {
         }
       }
 
-      const keysToDelete: string[] = [];
-      for (const categoryId of affectedCategoryIds) {
-        keysToDelete.push(CacheKey.productList(categoryId, 1, 20));
+      const stockKeys = insertedProductIds.map((id) => CacheKey.stock(id));
+      if (stockKeys.length > 0) {
+        await cacheDel(...stockKeys);
       }
-      for (const productId of insertedProductIds) {
-        keysToDelete.push(CacheKey.stock(productId));
-      }
-      keysToDelete.push(CacheKey.productListAll(1, 20));
-      if (keysToDelete.length > 0) {
-        await cacheDel(...keysToDelete);
-      }
+
+      await Promise.all([
+        ...[...affectedCategoryIds].map((categoryId) =>
+          cacheDelPattern(CacheKey.productListPattern(categoryId))
+        ),
+        cacheDelPattern(CacheKey.productListAllPattern()),
+      ]);
 
       const total = validRows.length + parseErrors.length;
       const failed = rowErrors.length;
 
       await writeAuditLog(db, {
         entity_type: "product",
-        entity_id: uuidv4(),
+        entity_id: generateId(),
         action: "create",
         performed_by: performedBy,
         metadata: { bulk_upload: true, total, success: successCount, failed },
         ip_address: ipAddress,
+      });
+
+      logger.info(SERVICE_NAME, "Bulk product upload completed", {
+        total,
+        success: successCount,
+        failed,
+        performed_by: performedBy,
       });
 
       callback(null, {
@@ -162,7 +176,9 @@ export function bulkUploadProductsHandler(call: any, callback: any): void {
         errors: rowErrors,
       });
     } catch (err) {
-      console.error("[inventory] bulk upload error:", err);
+      logger.error(SERVICE_NAME, "Bulk upload error", {
+        error: err instanceof Error ? err.message : String(err),
+      });
       callback(
         { code: 13, message: "Internal server error during bulk upload" },
         null
@@ -171,6 +187,8 @@ export function bulkUploadProductsHandler(call: any, callback: any): void {
   });
 
   call.on("error", (err: Error) => {
-    console.error("[inventory] bulk upload stream error:", err);
+    logger.error(SERVICE_NAME, "Bulk upload stream error", {
+      error: err.message,
+    });
   });
 }

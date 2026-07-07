@@ -2,10 +2,9 @@ import * as path from "path";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 
-const PROTO_DIR = path.resolve(__dirname, "../../proto");
+const PROTO_DIR = path.resolve(__dirname, "../../../proto");
 
 const PROTO_FILES = {
-  common: path.join(PROTO_DIR, "common.proto"),
   admin: path.join(PROTO_DIR, "admin.proto"),
   inventory: path.join(PROTO_DIR, "inventory.proto"),
   customer: path.join(PROTO_DIR, "customer.proto"),
@@ -50,9 +49,4 @@ export function getInventoryPackage(): grpc.GrpcObject {
 export function getCustomerPackage(): grpc.GrpcObject {
   const loaded = loadProto("customer");
   return loaded["customer"] as grpc.GrpcObject;
-}
-
-export function getCommonPackage(): grpc.GrpcObject {
-  const loaded = loadProto("common");
-  return loaded["common"] as grpc.GrpcObject;
 }

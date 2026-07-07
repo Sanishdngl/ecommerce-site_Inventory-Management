@@ -17,7 +17,7 @@ import {
   verifyAdminJWT,
   signCustomerJWT,
   verifyCustomerJWT,
-} from "../../../shared/src/jwt";
+} from "../../../shared/src/auth/jwt";
 
 describe("signAdminJWT / verifyAdminJWT", () => {
   it("signs and verifies a valid admin token", () => {
