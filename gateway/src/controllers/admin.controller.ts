@@ -1,36 +1,22 @@
 import type { Request, Response, NextFunction } from "express";
 import { getAdminClient } from "../grpc-clients/admin.client";
-import { callGrpc, buildMeta } from "../grpc-clients/index";
-import { signAdminJWT } from "@shared/jwt";
+import { callGrpc, buildMeta } from "@shared/grpc/call-grpc";
+import { signAdminJWT } from "@shared/auth/jwt";
 import type { AdminRole } from "@shared/types";
-
-//  Cookie config
-const ADMIN_COOKIE_NAME = "admin_refresh_token";
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "lax" as const,
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
-  path: "/",
-};
-
-// ── Role normalization
-const PROTO_ROLE_MAP: Record<string, AdminRole> = {
-  SUPER_ADMIN: "super_admin",
-  MAINTAINER: "maintainer",
-  REPORTER: "reporter",
-};
-const APP_ROLE_TO_PROTO: Record<string, string> = {
-  super_admin: "SUPER_ADMIN",
-  maintainer: "MAINTAINER",
-  reporter: "REPORTER",
-};
+import { normalizeRole, toProtoRole } from "@shared/constants/roles";
+import {
+  ADMIN_REFRESH_COOKIE,
+  setRefreshTokenCookie,
+  clearRefreshTokenCookie,
+  getRefreshTokenCookie,
+  requireRefreshTokenCookie,
+} from "@shared/utils/cookies";
 
 function normalizeUser(user: any) {
   if (!user) return user;
   return {
     ...user,
-    role: PROTO_ROLE_MAP[user.role] ?? user.role.toLowerCase(),
+    role: normalizeRole(user.role),
   };
 }
 
@@ -41,16 +27,6 @@ export async function loginAdmin(
 ): Promise<void> {
   try {
     const { username, password, device_id, device_pixel_ratio } = req.body;
-
-    if (!username || !password) {
-      res.status(400).json({ message: "username and password are required" });
-      return;
-    }
-
-    if (!device_id) {
-      res.status(400).json({ message: "device_id is required" });
-      return;
-    }
 
     const adminClient = getAdminClient();
     const response = await callGrpc<any, any>(adminClient, "LoginAdmin", {
@@ -67,7 +43,7 @@ export async function loginAdmin(
       role: normalized.role as AdminRole,
     });
 
-    res.cookie(ADMIN_COOKIE_NAME, response.refresh_token, COOKIE_OPTIONS);
+    setRefreshTokenCookie(res, ADMIN_REFRESH_COOKIE, response.refresh_token);
 
     res.status(200).json({ token, user: normalized });
   } catch (err) {
@@ -81,12 +57,7 @@ export async function refreshAdmin(
   next: NextFunction
 ): Promise<void> {
   try {
-    const refresh_token = req.cookies[ADMIN_COOKIE_NAME];
-
-    if (!refresh_token) {
-      res.status(400).json({ message: "refresh_token is required" });
-      return;
-    }
+    const refresh_token = requireRefreshTokenCookie(req, ADMIN_REFRESH_COOKIE);
 
     const adminClient = getAdminClient();
     const response = await callGrpc<any, any>(adminClient, "RefreshToken", {
@@ -99,7 +70,7 @@ export async function refreshAdmin(
       role: normalized.role as AdminRole,
     });
 
-    res.cookie(ADMIN_COOKIE_NAME, response.refresh_token, COOKIE_OPTIONS);
+    setRefreshTokenCookie(res, ADMIN_REFRESH_COOKIE, response.refresh_token);
 
     res.status(200).json({ token, user: normalized });
   } catch (err) {
@@ -113,7 +84,7 @@ export async function logoutAdmin(
   next: NextFunction
 ): Promise<void> {
   try {
-    const refreshToken = req.cookies[ADMIN_COOKIE_NAME];
+    const refreshToken = getRefreshTokenCookie(req, ADMIN_REFRESH_COOKIE);
 
     if (refreshToken) {
       const adminClient = getAdminClient();
@@ -122,7 +93,7 @@ export async function logoutAdmin(
       }).catch(() => {});
     }
 
-    res.clearCookie(ADMIN_COOKIE_NAME, { path: "/" });
+    clearRefreshTokenCookie(res, ADMIN_REFRESH_COOKIE);
     res.status(200).json({ success: true });
   } catch (err) {
     next(err);
@@ -135,8 +106,8 @@ export async function listAdminUsers(
   next: NextFunction
 ): Promise<void> {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const page = (req.query.page as number | undefined) ?? 1;
+    const limit = (req.query.limit as number | undefined) ?? 20;
 
     const adminClient = getAdminClient();
     const response = await callGrpc<any, any>(
@@ -167,11 +138,31 @@ export async function createAdminUser(
     const response = await callGrpc<any, any>(
       adminClient,
       "CreateAdminUser",
-      { username, email, password, role: APP_ROLE_TO_PROTO[role] ?? role },
+      { username, email, password, role: toProtoRole(role) },
       buildMeta(req.admin!.admin_id, req.ip, req.admin!.role)
     );
 
     res.status(201).json({ ...response, user: normalizeUser(response.user) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getAdminUser(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const adminClient = getAdminClient();
+    const response = await callGrpc<any, any>(
+      adminClient,
+      "GetAdminUser",
+      { id: req.params.id },
+      buildMeta(req.admin!.admin_id, req.ip, req.admin!.role)
+    );
+
+    res.status(200).json({ ...response, user: normalizeUser(response.user) });
   } catch (err) {
     next(err);
   }
@@ -183,7 +174,7 @@ export async function updateAdminUser(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { username, email, role } = req.body;
+    const { username, email, password, role } = req.body;
 
     const adminClient = getAdminClient();
     const response = await callGrpc<any, any>(
@@ -193,7 +184,8 @@ export async function updateAdminUser(
         id: req.params.id,
         username,
         email,
-        role: APP_ROLE_TO_PROTO[role] ?? role,
+        password,
+        role: toProtoRole(role),
       },
       buildMeta(req.admin!.admin_id, req.ip, req.admin!.role)
     );

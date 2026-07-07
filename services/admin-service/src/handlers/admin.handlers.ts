@@ -1,10 +1,32 @@
 import * as grpc from "@grpc/grpc-js";
-import { getDb } from "@shared/db";
-import { verifyPassword } from "@shared/password";
-import { writeAuditLog } from "@shared/audit";
-import { cacheSet, cacheGet, cacheDel, TTL, CacheKey } from "@shared/redis";
-import { generateRefreshToken, parseRefreshToken } from "@shared/jwt";
-import { Errors, handle } from "@shared/errors";
+import { getDb } from "@infrastructure/database/mysql";
+import { verifyPassword } from "@shared/auth/password";
+import { writeAuditLog } from "@infrastructure/observability/audit";
+import { cacheSet, cacheDel, TTL, CacheKey } from "@infrastructure/redis/redis";
+import { logger } from "@infrastructure/observability/logger";
+import {
+  generateRefreshToken,
+  parseRefreshToken,
+} from "@shared/auth/refresh-token";
+import { rotateRefreshToken } from "@shared/auth/rotate-refresh-token";
+import {
+  handle,
+  BadRequestError,
+  NotFoundError,
+  ForbiddenError,
+  ConflictError,
+  UnauthorizedError,
+} from "@shared/errors";
+import { validateGrpc } from "@shared/grpc/validate-grpc";
+import {
+  LoginAdminSchema,
+  CreateAdminGrpcSchema,
+  UpdateAdminGrpcSchema,
+  DeleteAdminSchema,
+  GetAdminSchema,
+  ToggleStatusSchema,
+  ListAdminGrpcSchema,
+} from "@shared/validation/admin.schema";
 import type { AdminRole, RefreshTokenPayload } from "@shared/types";
 import {
   findAdminByUsername,
@@ -16,18 +38,9 @@ import {
   toggleAdminStatus as dbToggleAdminStatus,
   listAdminUsers,
 } from "../db/admin.queries";
+import { APP_TO_PROTO_ROLE, fromProtoRole } from "@shared/constants/roles";
 
-const DB_TO_PROTO_ROLE: Record<string, string> = {
-  super_admin: "SUPER_ADMIN",
-  maintainer: "MAINTAINER",
-  reporter: "REPORTER",
-};
-
-const PROTO_TO_DB_ROLE: Record<string, string> = {
-  SUPER_ADMIN: "super_admin",
-  MAINTAINER: "maintainer",
-  REPORTER: "reporter",
-};
+const SERVICE_NAME = "admin-service";
 
 function getMetaValue(
   call: grpc.ServerUnaryCall<any, any>,
@@ -40,7 +53,7 @@ function getMetaValue(
 function requireSuperAdmin(call: grpc.ServerUnaryCall<any, any>): void {
   const role = getMetaValue(call, "role");
   if (role !== "super_admin") {
-    throw Errors.permissionDenied("Only Super Admin can perform this action");
+    throw new ForbiddenError("Only Super Admin can perform this action");
   }
 }
 
@@ -48,30 +61,32 @@ function sanitizeUser(user: any) {
   const { password_hash, ...safe } = user;
   return {
     ...safe,
-    role: DB_TO_PROTO_ROLE[safe.role] ?? safe.role,
+    role: APP_TO_PROTO_ROLE[safe.role as AdminRole] ?? safe.role,
   };
 }
 
 export const loginAdmin = handle(async (call, callback) => {
   const db = getDb();
-  const { username, password, device_id, device_pixel_ratio } =
-    call.request as any;
-
-  if (!username || !password) {
-    throw Errors.invalidArgument("username and password are required");
-  }
-  if (!device_id) {
-    throw Errors.invalidArgument("device_id is required");
-  }
+  const { username, password, device_id, device_pixel_ratio } = validateGrpc(
+    LoginAdminSchema,
+    call.request
+  );
 
   const user = await findAdminByUsername(db, username);
   if (!user || !user.is_active) {
-    throw Errors.unauthenticated("Invalid credentials");
+    logger.warn(SERVICE_NAME, "Admin login failed: unknown or inactive user", {
+      username,
+    });
+    throw new UnauthorizedError("Invalid credentials");
   }
 
   const valid = await verifyPassword(password, user.password_hash);
   if (!valid) {
-    throw Errors.unauthenticated("Invalid credentials");
+    logger.warn(SERVICE_NAME, "Admin login failed: bad password", {
+      admin_id: user.id,
+      username,
+    });
+    throw new UnauthorizedError("Invalid credentials");
   }
 
   const key = CacheKey.refreshAdmin(user.id, device_id);
@@ -86,6 +101,12 @@ export const loginAdmin = handle(async (call, callback) => {
   };
 
   await cacheSet(key, JSON.stringify(payload), TTL.REFRESH_TOKEN_ADMIN);
+
+  logger.info(SERVICE_NAME, "Admin logged in", {
+    admin_id: user.id,
+    username,
+    device_id,
+  });
 
   callback(null, { user: sanitizeUser(user), refresh_token: refreshToken });
 });
@@ -109,26 +130,24 @@ export const createAdminUser = handle(async (call, callback) => {
   requireSuperAdmin(call);
 
   const db = getDb();
-  const { username, email, password } = call.request as any;
-  const rawRole = (call.request as any).role as string;
-  const role = PROTO_TO_DB_ROLE[rawRole] ?? rawRole;
-
-  if (!username || !email || !password || !role) {
-    throw Errors.invalidArgument(
-      "username, email, password, and role are required"
-    );
-  }
+  const {
+    username,
+    email,
+    password,
+    role: rawRole,
+  } = validateGrpc(CreateAdminGrpcSchema, call.request);
+  const role = fromProtoRole(rawRole);
 
   const validRoles: AdminRole[] = ["maintainer", "reporter"];
   if (!validRoles.includes(role as AdminRole)) {
-    throw Errors.invalidArgument("role must be maintainer or reporter");
+    throw new BadRequestError("role must be maintainer or reporter");
   }
 
   const existingUsername = await findAdminByUsername(db, username);
-  if (existingUsername) throw Errors.alreadyExists("Username already taken");
+  if (existingUsername) throw new ConflictError("Username already taken");
 
   const existingEmail = await findAdminByEmail(db, email);
-  if (existingEmail) throw Errors.alreadyExists("Email already in use");
+  if (existingEmail) throw new ConflictError("Email already in use");
 
   const user = await insertAdminUser(db, {
     username,
@@ -148,6 +167,25 @@ export const createAdminUser = handle(async (call, callback) => {
     ip_address: ipAddress,
   });
 
+  logger.info(SERVICE_NAME, "Admin user created", {
+    admin_id: user.id,
+    username,
+    role,
+    performed_by: performedBy,
+  });
+
+  callback(null, { user: sanitizeUser(user) });
+});
+
+export const getAdminUser = handle(async (call, callback) => {
+  requireSuperAdmin(call);
+
+  const db = getDb();
+  const { id } = validateGrpc(GetAdminSchema, call.request);
+
+  const user = await findAdminById(db, id);
+  if (!user) throw new NotFoundError("Admin user not found");
+
   callback(null, { user: sanitizeUser(user) });
 });
 
@@ -155,21 +193,29 @@ export const updateAdminUser = handle(async (call, callback) => {
   requireSuperAdmin(call);
 
   const db = getDb();
-  const { id, username, email } = call.request as any;
-  const rawRole = (call.request as any).role as string | undefined;
-  const role =
-    rawRole && rawRole !== "ADMIN_ROLE_UNSPECIFIED"
-      ? PROTO_TO_DB_ROLE[rawRole] ?? rawRole
-      : undefined;
-
-  if (!id) throw Errors.invalidArgument("id is required");
+  const rawRoleInput = (call.request as any).role as string | undefined;
+  const {
+    id,
+    username,
+    email,
+    password,
+    role: rawRole,
+  } = validateGrpc(UpdateAdminGrpcSchema, {
+    ...(call.request as any),
+    role:
+      rawRoleInput && rawRoleInput !== "ADMIN_ROLE_UNSPECIFIED"
+        ? rawRoleInput
+        : undefined,
+  });
+  const role = rawRole ? fromProtoRole(rawRole) : undefined;
 
   const existing = await findAdminById(db, id);
-  if (!existing) throw Errors.notFound("Admin user not found");
+  if (!existing) throw new NotFoundError("Admin user not found");
 
   const updated = await dbUpdateAdminUser(db, id, {
     username,
     email,
+    password,
     role: role as AdminRole | undefined,
   });
   const performedBy = getMetaValue(call, "admin_id")!;
@@ -182,6 +228,9 @@ export const updateAdminUser = handle(async (call, callback) => {
     diff.email = { from: existing.email, to: email };
   if (role && role !== existing.role)
     diff.role = { from: existing.role, to: role };
+  // Password changes are logged as a boolean flag only — never the value,
+  // hash, or a from/to pair, unlike every other field above.
+  if (password) diff.password = { from: "[redacted]", to: "[redacted]" };
 
   await writeAuditLog(db, {
     entity_type: "admin_user",
@@ -192,6 +241,12 @@ export const updateAdminUser = handle(async (call, callback) => {
     ip_address: ipAddress,
   });
 
+  logger.info(SERVICE_NAME, "Admin user updated", {
+    admin_id: id,
+    performed_by: performedBy,
+    diff,
+  });
+
   callback(null, { user: sanitizeUser(updated!) });
 });
 
@@ -199,16 +254,14 @@ export const deleteAdminUser = handle(async (call, callback) => {
   requireSuperAdmin(call);
 
   const db = getDb();
-  const { id } = call.request as any;
-
-  if (!id) throw Errors.invalidArgument("id is required");
+  const { id } = validateGrpc(DeleteAdminSchema, call.request);
 
   const existing = await findAdminById(db, id);
-  if (!existing) throw Errors.notFound("Admin user not found");
+  if (!existing) throw new NotFoundError("Admin user not found");
 
   const performedBy = getMetaValue(call, "admin_id")!;
   if (id === performedBy) {
-    throw Errors.permissionDenied("Cannot delete your own account");
+    throw new ForbiddenError("Cannot delete your own account");
   }
 
   await dbDeleteAdminUser(db, id);
@@ -224,6 +277,12 @@ export const deleteAdminUser = handle(async (call, callback) => {
     ip_address: ipAddress,
   });
 
+  logger.info(SERVICE_NAME, "Admin user deleted", {
+    admin_id: id,
+    username: existing.username,
+    performed_by: performedBy,
+  });
+
   callback(null, { success: true, message: "Admin user deleted" });
 });
 
@@ -231,15 +290,14 @@ export const toggleAdminStatus = handle(async (call, callback) => {
   requireSuperAdmin(call);
 
   const db = getDb();
-  const { id } = call.request as any;
-  if (!id) throw Errors.invalidArgument("id is required");
+  const { id } = validateGrpc(ToggleStatusSchema, call.request);
 
   const existing = await findAdminById(db, id);
-  if (!existing) throw Errors.notFound("Admin user not found");
+  if (!existing) throw new NotFoundError("Admin user not found");
 
   const performedBy = getMetaValue(call, "admin_id")!;
   if (id === performedBy) {
-    throw Errors.permissionDenied("Cannot toggle your own status");
+    throw new ForbiddenError("Cannot toggle your own status");
   }
 
   await dbToggleAdminStatus(db, id);
@@ -257,6 +315,12 @@ export const toggleAdminStatus = handle(async (call, callback) => {
     ip_address: ipAddress,
   });
 
+  logger.info(SERVICE_NAME, "Admin user status toggled", {
+    admin_id: id,
+    is_active: !existing.is_active,
+    performed_by: performedBy,
+  });
+
   callback(null, {
     success: true,
     message: `Admin user ${existing.is_active ? "deactivated" : "activated"}`,
@@ -267,9 +331,9 @@ export const listAdminUsersHandler = handle(async (call, callback) => {
   requireSuperAdmin(call);
 
   const db = getDb();
-  const { pagination } = call.request as any;
-  const page = pagination?.page || 1;
-  const limit = pagination?.limit || 20;
+  const { pagination } = validateGrpc(ListAdminGrpcSchema, call.request);
+  const page = pagination?.page ?? 1;
+  const limit = pagination?.limit ?? 20;
   const { users, total } = await listAdminUsers(db, page, limit);
 
   callback(null, {
@@ -280,70 +344,21 @@ export const listAdminUsersHandler = handle(async (call, callback) => {
 
 export const refreshAdminToken = handle(async (call, callback) => {
   const { refresh_token } = call.request as any;
-  if (!refresh_token) {
-    throw Errors.invalidArgument("refresh_token is required");
-  }
-
-  const parsed = parseRefreshToken(refresh_token);
-  if (!parsed) {
-    throw Errors.unauthenticated("Refresh token malformed");
-  }
-
-  const { userId: admin_id, deviceId: device_id } = parsed;
-  const key = CacheKey.refreshAdmin(admin_id, device_id);
-  const raw = await cacheGet<string>(key);
-  if (!raw) {
-    throw Errors.unauthenticated("Refresh token invalid or expired");
-  }
-
-  // token matches just rotated previous token
-  const stored: RefreshTokenPayload = JSON.parse(raw as any);
-  const isCurrent = stored.token === refresh_token;
-  const isPrevious =
-    stored.previous_token === refresh_token &&
-    stored.previous_token_expires_at &&
-    Date.now() < stored.previous_token_expires_at;
-
-  if (!isCurrent && !isPrevious) {
-    throw Errors.unauthenticated("Refresh token already rotated");
-  }
-
   const db = getDb();
-  const user = await findAdminById(db, admin_id);
 
-  if (!user || !user.is_active) {
-    await cacheDel(key);
-    throw Errors.unauthenticated("Admin account not found or deactivated");
-  }
-
-  // avoids rotation chains
-  if (isPrevious) {
-    callback(null, {
-      admin_id,
-      role: DB_TO_PROTO_ROLE[user.role] ?? user.role,
-      refresh_token: stored.token,
-      user: sanitizeUser(user),
-    });
-    return;
-  }
-
-  // normal rotation
-  const newRefreshToken = generateRefreshToken(admin_id, device_id);
-  const newPayload: RefreshTokenPayload = {
-    token: newRefreshToken,
-    previous_token: stored.token,
-    previous_token_expires_at: Date.now() + TTL.REFRESH_GRACE_PERIOD * 1000,
-    role: user.role,
-    device_pixel_ratio: stored.device_pixel_ratio,
-    created_at: new Date().toISOString(),
-  };
-
-  await cacheSet(key, JSON.stringify(newPayload), TTL.REFRESH_TOKEN_ADMIN);
+  const result = await rotateRefreshToken({
+    refreshToken: refresh_token,
+    cacheKey: CacheKey.refreshAdmin,
+    ttlSeconds: TTL.REFRESH_TOKEN_ADMIN,
+    gracePeriodSeconds: TTL.REFRESH_GRACE_PERIOD,
+    findUser: (id) => findAdminById(db, id),
+    isActive: (user) => user.is_active,
+  });
 
   callback(null, {
-    admin_id,
-    role: DB_TO_PROTO_ROLE[user.role] ?? user.role,
-    refresh_token: newRefreshToken,
-    user: sanitizeUser(user),
+    admin_id: result.userId,
+    role: APP_TO_PROTO_ROLE[result.user.role] ?? result.user.role,
+    refresh_token: result.refreshToken,
+    user: sanitizeUser(result.user),
   });
 });

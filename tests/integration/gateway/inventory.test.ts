@@ -1,7 +1,11 @@
 import request from "supertest";
 import app from "../../../gateway/src/app";
 import { loginAsSuperAdmin, adminAuthHeader } from "../helpers/auth";
-import { deleteCategoryBySlug, deleteProductByName } from "../helpers/cleanup";
+import {
+  deleteCategoryBySlug,
+  deleteProductByName,
+  purgeAdminUserAuditTrail,
+} from "../helpers/cleanup";
 
 let superAdminToken: string;
 let createdCategoryId: string;
@@ -216,6 +220,8 @@ describe("Role enforcement on inventory routes", () => {
     const loginRes = await request(app).post("/api/admin/auth/login").send({
       username: createRes.body.user.username,
       password: "testpassword123",
+      device_id: "integration-test-device",
+      device_pixel_ratio: 1,
     });
 
     reporterToken = loginRes.body.token;
@@ -225,6 +231,8 @@ describe("Role enforcement on inventory routes", () => {
     await request(app)
       .delete(`/api/admin/users/${reporterUserId}`)
       .set(adminAuthHeader(superAdminToken));
+
+    await purgeAdminUserAuditTrail(reporterUserId);
   });
 
   it("reporter cannot create a category", async () => {

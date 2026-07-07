@@ -1,7 +1,7 @@
-import * as grpc from "@grpc/grpc-js";
-
 const mockExecute = jest.fn();
-jest.mock("@shared/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
+jest.mock("@infrastructure/database/mysql", () => ({
+  getDb: () => ({ execute: mockExecute }),
+}));
 jest.mock("@shared/errors", () => {
   const actual = jest.requireActual("@shared/errors");
   return { ...actual, handle: (fn: any) => fn };
@@ -18,7 +18,7 @@ function makeCall(request: any): any {
 
 function makeCustomer(overrides: any = {}): any {
   return {
-    id: "cust-1",
+    id: "11111111-1111-4111-8111-111111111111",
     email: "user@test.com",
     password_hash: "$2b$12$hashed",
     first_name: "John",
@@ -37,12 +37,17 @@ describe("getProfile", () => {
     mockExecute.mockResolvedValueOnce([[makeCustomer()]]);
 
     const callback = jest.fn();
-    await getProfile(makeCall({ customer_id: "cust-1" }), callback);
+    await getProfile(
+      makeCall({ customer_id: "11111111-1111-4111-8111-111111111111" }),
+      callback
+    );
 
     expect(callback).toHaveBeenCalledWith(
       null,
       expect.objectContaining({
-        customer: expect.objectContaining({ id: "cust-1" }),
+        customer: expect.objectContaining({
+          id: "11111111-1111-4111-8111-111111111111",
+        }),
       })
     );
   });
@@ -50,7 +55,7 @@ describe("getProfile", () => {
   it("throws INVALID_ARGUMENT when customer_id missing", async () => {
     const callback = jest.fn();
     await expect(getProfile(makeCall({}), callback)).rejects.toMatchObject({
-      code: grpc.status.INVALID_ARGUMENT,
+      code: "BAD_REQUEST",
     });
   });
 
@@ -59,15 +64,21 @@ describe("getProfile", () => {
 
     const callback = jest.fn();
     await expect(
-      getProfile(makeCall({ customer_id: "ghost" }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.NOT_FOUND });
+      getProfile(
+        makeCall({ customer_id: "00000000-0000-4000-8000-000000000000" }),
+        callback
+      )
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("does not expose password_hash", async () => {
     mockExecute.mockResolvedValueOnce([[makeCustomer()]]);
 
     const callback = jest.fn();
-    await getProfile(makeCall({ customer_id: "cust-1" }), callback);
+    await getProfile(
+      makeCall({ customer_id: "11111111-1111-4111-8111-111111111111" }),
+      callback
+    );
 
     expect(callback.mock.calls[0][1].customer.password_hash).toBeUndefined();
   });
@@ -86,7 +97,7 @@ describe("updateProfile", () => {
     const callback = jest.fn();
     await updateProfile(
       makeCall({
-        customer_id: "cust-1",
+        customer_id: "11111111-1111-4111-8111-111111111111",
         first_name: "Jane",
         last_name: "Smith",
       }),
@@ -107,7 +118,7 @@ describe("updateProfile", () => {
   it("throws INVALID_ARGUMENT when customer_id missing", async () => {
     const callback = jest.fn();
     await expect(updateProfile(makeCall({}), callback)).rejects.toMatchObject({
-      code: grpc.status.INVALID_ARGUMENT,
+      code: "BAD_REQUEST",
     });
   });
 
@@ -117,9 +128,12 @@ describe("updateProfile", () => {
     const callback = jest.fn();
     await expect(
       updateProfile(
-        makeCall({ customer_id: "ghost", first_name: "A" }),
+        makeCall({
+          customer_id: "00000000-0000-4000-8000-000000000000",
+          first_name: "A",
+        }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.NOT_FOUND });
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });

@@ -1,13 +1,13 @@
-import * as grpc from "@grpc/grpc-js";
-
 const mockExecute = jest.fn();
 const mockCacheGet = jest.fn();
 const mockCacheSet = jest.fn();
 const mockCacheDel = jest.fn();
 const mockCallInventory = jest.fn();
 
-jest.mock("@shared/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
-jest.mock("@shared/redis", () => ({
+jest.mock("@infrastructure/database/mysql", () => ({
+  getDb: () => ({ execute: mockExecute }),
+}));
+jest.mock("@infrastructure/redis/redis", () => ({
   cacheGet: (...args: any[]) => mockCacheGet(...args),
   cacheSet: (...args: any[]) => mockCacheSet(...args),
   cacheDel: (...args: any[]) => mockCacheDel(...args),
@@ -18,12 +18,14 @@ jest.mock("@shared/errors", () => {
   const actual = jest.requireActual("@shared/errors");
   return { ...actual, handle: (fn: any) => fn };
 });
-jest.mock(
-  "../../../services/customer-service/src/grpc-clients/inventory.client",
-  () => ({
-    callInventory: (...args: any[]) => mockCallInventory(...args),
-  })
-);
+// mock callGrpc directly rather than inventing a callInventory helper that
+// doesn't exist. getInventoryClient is stubbed to avoid loading real protos.
+jest.mock("@shared/grpc/call-grpc", () => ({
+  callGrpc: (...args: any[]) => mockCallInventory(...args),
+}));
+jest.mock("@shared/grpc/inventory.client", () => ({
+  getInventoryClient: () => ({}),
+}));
 
 import {
   addToCart,
@@ -38,7 +40,7 @@ function makeCall(request: any): any {
 
 const mockProducts = [
   {
-    id: "prod-1",
+    id: "22222222-2222-4222-8222-222222222222",
     name: "T-Shirt",
     price: "19.99",
     thumbnail_url: null,
@@ -51,9 +53,9 @@ describe("addToCart", () => {
 
   it("adds item to cart and returns enriched cart", async () => {
     mockExecute
-      .mockResolvedValueOnce([[{ id: "cust-1", is_active: true }]]) // findCustomer
+      .mockResolvedValueOnce([[{ id: "11111111-1111-4111-8111-111111111111", is_active: true }]]) // findCustomer
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // upsert
-      .mockResolvedValueOnce([[{ product_id: "prod-1", quantity: 2 }]]); // getRawCartItems
+      .mockResolvedValueOnce([[{ product_id: "22222222-2222-4222-8222-222222222222", quantity: 2 }]]); // getRawCartItems
 
     mockCallInventory.mockResolvedValueOnce({ products: mockProducts });
     mockCacheDel.mockResolvedValue(undefined);
@@ -61,7 +63,7 @@ describe("addToCart", () => {
 
     const callback = jest.fn();
     await addToCart(
-      makeCall({ customer_id: "cust-1", product_id: "prod-1", quantity: 2 }),
+      makeCall({ customer_id: "11111111-1111-4111-8111-111111111111", product_id: "22222222-2222-4222-8222-222222222222", quantity: 2 }),
       callback
     );
 
@@ -69,41 +71,45 @@ describe("addToCart", () => {
       null,
       expect.objectContaining({
         items: expect.arrayContaining([
-          expect.objectContaining({ product_id: "prod-1", quantity: 2 }),
+          expect.objectContaining({ product_id: "22222222-2222-4222-8222-222222222222", quantity: 2 }),
         ]),
       })
     );
-    expect(mockCacheDel).toHaveBeenCalledWith("cart:cust-1");
-    expect(mockCallInventory).toHaveBeenCalledWith("GetProductsByIds", {
-      ids: ["prod-1"],
-    });
+    expect(mockCacheDel).toHaveBeenCalledWith("cart:11111111-1111-4111-8111-111111111111");
+    expect(mockCallInventory).toHaveBeenCalledWith(
+      expect.anything(),
+      "GetProductsByIds",
+      {
+        ids: ["22222222-2222-4222-8222-222222222222"],
+      }
+    );
   });
 
   it("throws INVALID_ARGUMENT when customer_id missing", async () => {
     const callback = jest.fn();
     await expect(
-      addToCart(makeCall({ product_id: "prod-1", quantity: 1 }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+      addToCart(makeCall({ product_id: "22222222-2222-4222-8222-222222222222", quantity: 1 }), callback)
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws INVALID_ARGUMENT when quantity is zero", async () => {
     const callback = jest.fn();
     await expect(
       addToCart(
-        makeCall({ customer_id: "cust-1", product_id: "prod-1", quantity: 0 }),
+        makeCall({ customer_id: "11111111-1111-4111-8111-111111111111", product_id: "22222222-2222-4222-8222-222222222222", quantity: 0 }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws INVALID_ARGUMENT when quantity is negative", async () => {
     const callback = jest.fn();
     await expect(
       addToCart(
-        makeCall({ customer_id: "cust-1", product_id: "prod-1", quantity: -1 }),
+        makeCall({ customer_id: "11111111-1111-4111-8111-111111111111", product_id: "22222222-2222-4222-8222-222222222222", quantity: -1 }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws NOT_FOUND when customer does not exist", async () => {
@@ -112,10 +118,10 @@ describe("addToCart", () => {
     const callback = jest.fn();
     await expect(
       addToCart(
-        makeCall({ customer_id: "ghost", product_id: "prod-1", quantity: 1 }),
+        makeCall({ customer_id: "00000000-0000-4000-8000-000000000000", product_id: "22222222-2222-4222-8222-222222222222", quantity: 1 }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.NOT_FOUND });
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 
@@ -126,7 +132,7 @@ describe("updateCartItem", () => {
     mockExecute
       .mockResolvedValueOnce([[{ id: "cart-item-1" }]]) // cartItemExists
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // setQuantity
-      .mockResolvedValueOnce([[{ product_id: "prod-1", quantity: 5 }]]); // getRawCartItems
+      .mockResolvedValueOnce([[{ product_id: "22222222-2222-4222-8222-222222222222", quantity: 5 }]]); // getRawCartItems
 
     mockCallInventory.mockResolvedValueOnce({ products: mockProducts });
     mockCacheDel.mockResolvedValue(undefined);
@@ -134,7 +140,7 @@ describe("updateCartItem", () => {
 
     const callback = jest.fn();
     await updateCartItem(
-      makeCall({ customer_id: "cust-1", product_id: "prod-1", quantity: 5 }),
+      makeCall({ customer_id: "11111111-1111-4111-8111-111111111111", product_id: "22222222-2222-4222-8222-222222222222", quantity: 5 }),
       callback
     );
 
@@ -152,10 +158,10 @@ describe("updateCartItem", () => {
     const callback = jest.fn();
     await expect(
       updateCartItem(
-        makeCall({ customer_id: "cust-1", product_id: "prod-1", quantity: 0 }),
+        makeCall({ customer_id: "11111111-1111-4111-8111-111111111111", product_id: "22222222-2222-4222-8222-222222222222", quantity: 0 }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws NOT_FOUND when cart item does not exist", async () => {
@@ -164,10 +170,10 @@ describe("updateCartItem", () => {
     const callback = jest.fn();
     await expect(
       updateCartItem(
-        makeCall({ customer_id: "cust-1", product_id: "prod-1", quantity: 3 }),
+        makeCall({ customer_id: "11111111-1111-4111-8111-111111111111", product_id: "22222222-2222-4222-8222-222222222222", quantity: 3 }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.NOT_FOUND });
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 
@@ -185,18 +191,18 @@ describe("removeFromCart", () => {
 
     const callback = jest.fn();
     await removeFromCart(
-      makeCall({ customer_id: "cust-1", product_id: "prod-1" }),
+      makeCall({ customer_id: "11111111-1111-4111-8111-111111111111", product_id: "22222222-2222-4222-8222-222222222222" }),
       callback
     );
 
     expect(callback).toHaveBeenCalledWith(null, { items: [] });
-    expect(mockCacheDel).toHaveBeenCalledWith("cart:cust-1");
+    expect(mockCacheDel).toHaveBeenCalledWith("cart:11111111-1111-4111-8111-111111111111");
   });
 
   it("throws INVALID_ARGUMENT when fields missing", async () => {
     const callback = jest.fn();
     await expect(removeFromCart(makeCall({}), callback)).rejects.toMatchObject({
-      code: grpc.status.INVALID_ARGUMENT,
+      code: "BAD_REQUEST",
     });
   });
 
@@ -206,10 +212,10 @@ describe("removeFromCart", () => {
     const callback = jest.fn();
     await expect(
       removeFromCart(
-        makeCall({ customer_id: "cust-1", product_id: "prod-1" }),
+        makeCall({ customer_id: "11111111-1111-4111-8111-111111111111", product_id: "22222222-2222-4222-8222-222222222222" }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.NOT_FOUND });
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 
@@ -219,7 +225,7 @@ describe("getCart", () => {
   it("returns cached cart when available", async () => {
     const cached = [
       {
-        product_id: "prod-1",
+        product_id: "22222222-2222-4222-8222-222222222222",
         quantity: 1,
         product_name: "T-Shirt",
         price: "19.99",
@@ -230,7 +236,7 @@ describe("getCart", () => {
     mockCacheGet.mockResolvedValueOnce(cached);
 
     const callback = jest.fn();
-    await getCart(makeCall({ customer_id: "cust-1" }), callback);
+    await getCart(makeCall({ customer_id: "11111111-1111-4111-8111-111111111111" }), callback);
 
     expect(callback).toHaveBeenCalledWith(null, { items: cached });
     expect(mockExecute).not.toHaveBeenCalled();
@@ -240,22 +246,26 @@ describe("getCart", () => {
   it("fetches from DB and enriches via gRPC on cache miss", async () => {
     mockCacheGet.mockResolvedValueOnce(null);
     mockExecute.mockResolvedValueOnce([
-      [{ product_id: "prod-1", quantity: 2 }],
+      [{ product_id: "22222222-2222-4222-8222-222222222222", quantity: 2 }],
     ]);
     mockCallInventory.mockResolvedValueOnce({ products: mockProducts });
     mockCacheSet.mockResolvedValue(undefined);
 
     const callback = jest.fn();
-    await getCart(makeCall({ customer_id: "cust-1" }), callback);
+    await getCart(makeCall({ customer_id: "11111111-1111-4111-8111-111111111111" }), callback);
 
-    expect(mockCallInventory).toHaveBeenCalledWith("GetProductsByIds", {
-      ids: ["prod-1"],
-    });
+    expect(mockCallInventory).toHaveBeenCalledWith(
+      expect.anything(),
+      "GetProductsByIds",
+      {
+        ids: ["22222222-2222-4222-8222-222222222222"],
+      }
+    );
     expect(callback).toHaveBeenCalledWith(
       null,
       expect.objectContaining({
         items: expect.arrayContaining([
-          expect.objectContaining({ product_id: "prod-1" }),
+          expect.objectContaining({ product_id: "22222222-2222-4222-8222-222222222222" }),
         ]),
       })
     );
@@ -268,7 +278,7 @@ describe("getCart", () => {
     mockCacheSet.mockResolvedValue(undefined);
 
     const callback = jest.fn();
-    await getCart(makeCall({ customer_id: "cust-1" }), callback);
+    await getCart(makeCall({ customer_id: "11111111-1111-4111-8111-111111111111" }), callback);
 
     expect(callback).toHaveBeenCalledWith(null, { items: [] });
     expect(mockCallInventory).not.toHaveBeenCalled();
@@ -277,7 +287,7 @@ describe("getCart", () => {
   it("throws INVALID_ARGUMENT when customer_id missing", async () => {
     const callback = jest.fn();
     await expect(getCart(makeCall({}), callback)).rejects.toMatchObject({
-      code: grpc.status.INVALID_ARGUMENT,
+      code: "BAD_REQUEST",
     });
   });
 });

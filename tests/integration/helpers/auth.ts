@@ -17,6 +17,8 @@ export async function loginAsSuperAdmin(): Promise<AdminTokens> {
     .send({
       username: process.env.SUPER_ADMIN_USERNAME ?? "superadmin",
       password: process.env.SUPER_ADMIN_PASSWORD,
+      device_id: "integration-test-device",
+      device_pixel_ratio: 1,
     });
 
   if (res.status !== 200) {
@@ -34,9 +36,14 @@ export async function registerAndLoginCustomer(
   email = `test_${Date.now()}@example.com`,
   password = "testpassword123"
 ): Promise<CustomerTokens> {
-  const res = await request(app)
-    .post("/api/customer/auth/register")
-    .send({ email, password, first_name: "Test", last_name: "User" });
+  const res = await request(app).post("/api/customer/auth/register").send({
+    email,
+    password,
+    first_name: "Test",
+    last_name: "User",
+    device_id: "integration-test-device",
+    device_pixel_ratio: 1,
+  });
 
   if (res.status !== 201) {
     throw new Error(`Customer register failed: ${JSON.stringify(res.body)}`);

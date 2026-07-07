@@ -1,33 +1,12 @@
-import * as Minio from "minio";
+import { getRustFSClient, ensureBucket } from "@infrastructure/storage/s3";
+import { ImageType } from "@shared/types";
 
-let client: Minio.Client | null = null;
-
-export function getRustFSClient(): Minio.Client {
-  if (client) return client;
-
-  const endpoint = process.env.RUSTFS_ENDPOINT;
-  if (!endpoint) throw new Error("RUSTFS_ENDPOINT is not set");
-
-  const url = new URL(endpoint);
-
-  client = new Minio.Client({
-    endPoint: url.hostname,
-    port: url.port ? parseInt(url.port, 10) : 9000,
-    useSSL: url.protocol === "https:",
-    accessKey: process.env.RUSTFS_ACCESS_KEY ?? "",
-    secretKey: process.env.RUSTFS_SECRET_KEY ?? "",
-  });
-
-  return client;
-}
-
-export function getBucket(): string {
+// Not exported — every consumer goes through the functions below.
+function getBucket(): string {
   const bucket = process.env.RUSTFS_BUCKET;
   if (!bucket) throw new Error("RUSTFS_BUCKET is not set");
   return bucket;
 }
-
-export type ImageType = "thumbnail" | "list_image";
 
 function objectKey(
   productId: string,
@@ -37,7 +16,7 @@ function objectKey(
   return `products/${productId}/${imageType}.${ext}`;
 }
 
-function extFromMime(mimeType: string): string {
+export function extFromMime(mimeType: string): string {
   const map: Record<string, string> = {
     "image/jpeg": "jpg",
     "image/png": "png",
@@ -66,25 +45,27 @@ export async function uploadProductImage(
   return `${endpoint}/${bucket}/${key}`;
 }
 
+// Takes the extension directly rather than a mime type — the caller only
+// has the *previous* image's stored URL (mime type isn't persisted), so
+// extFromUrl is how callers get here.
 export async function deleteProductImage(
   productId: string,
   imageType: ImageType,
-  mimeType: string
+  ext: string
 ): Promise<void> {
   const rustfs = getRustFSClient();
   const bucket = getBucket();
-  const ext = extFromMime(mimeType);
   const key = objectKey(productId, imageType, ext);
 
   await rustfs.removeObject(bucket, key);
 }
 
-export async function ensureBucket(): Promise<void> {
-  const rustfs = getRustFSClient();
-  const bucket = getBucket();
-  const exists = await rustfs.bucketExists(bucket);
-  if (!exists) {
-    await rustfs.makeBucket(bucket);
-    console.log(`[rustfs] created bucket: ${bucket}`);
-  }
+// Pulls the extension off a stored image URL
+// (".../products/{id}/thumbnail.png" -> "png").
+export function extFromUrl(url: string): string | undefined {
+  return /\.([a-z0-9]+)$/i.exec(url)?.[1];
+}
+
+export async function ensureProductBucket(): Promise<void> {
+  await ensureBucket(getBucket());
 }

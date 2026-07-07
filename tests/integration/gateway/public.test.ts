@@ -1,9 +1,10 @@
 import request from "supertest";
 import app from "../../../gateway/src/app";
 import { loginAsSuperAdmin, adminAuthHeader } from "../helpers/auth";
-import { deleteCategoryBySlug, deleteProductByName } from "../helpers/cleanup";
+import { deleteCategoryById, deleteProductById } from "../helpers/cleanup";
 
 let categorySlug: string;
+let categoryId: string;
 let productId: string;
 
 beforeAll(async () => {
@@ -16,13 +17,13 @@ beforeAll(async () => {
     .set(adminAuthHeader(token))
     .send({ name: `Public Test Category ${Date.now()}`, slug: categorySlug });
 
-  const catId = catRes.body.category.id;
+  categoryId = catRes.body.category.id;
 
   const prodRes = await request(app)
     .post("/api/admin/inventory/products")
     .set(adminAuthHeader(token))
     .send({
-      category_id: catId,
+      category_id: categoryId,
       name: `Public Test Product ${Date.now()}`,
       price: "19.99",
       stock_quantity: 50,
@@ -32,8 +33,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await deleteProductByName(`Public Test Product`);
-  await deleteCategoryBySlug(categorySlug);
+  await deleteProductById(productId);
+  await deleteCategoryById(categoryId);
 });
 
 describe("GET /api/categories", () => {
@@ -62,9 +63,11 @@ describe("GET /api/products", () => {
     expect(res.body.products.length).toBeGreaterThan(0);
   });
 
-  it("returns 400 when category slug is missing", async () => {
+  it("returns all products when category slug is omitted", async () => {
     const res = await request(app).get("/api/products");
-    expect(res.status).toBe(400);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.products)).toBe(true);
   });
 
   it("returns 404 for non-existent category slug", async () => {

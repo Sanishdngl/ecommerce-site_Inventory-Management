@@ -1,7 +1,6 @@
 const mockExecute = jest.fn();
-jest.mock("@shared/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
 
-import { writeAuditLog } from "../../../shared/src/audit";
+import { writeAuditLog } from "../../../infrastructure/observability/audit";
 
 const baseEntry = {
   entity_type: "product" as const,

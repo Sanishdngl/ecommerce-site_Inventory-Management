@@ -3,6 +3,8 @@ export type AdminRole = "super_admin" | "maintainer" | "reporter";
 export type AuditAction = "create" | "update" | "delete";
 export type AuditEntityType = "admin_user" | "product" | "category";
 
+export type ValidateTarget = "body" | "params" | "query";
+
 export interface AdminUser {
   id: string;
   username: string;
@@ -49,13 +51,12 @@ export interface Customer {
   updated_at: Date;
 }
 
-export interface CartItem {
-  id: string;
-  customer_id: string;
-  product_id: string;
-  quantity: number;
-  added_at: Date;
-  updated_at: Date;
+export interface OAuthProfile {
+  oauth_id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  oauth_provider: string;
 }
 
 export interface EnrichedCartItem {
@@ -97,6 +98,29 @@ export interface CustomerJWTPayload {
   exp: number;
 }
 
+export interface RefreshCookieConfig {
+  name: string;
+  maxAgeMs: number;
+}
+
+export interface RotateRefreshTokenParams<TUser> {
+  refreshToken: string;
+  cacheKey: (userId: string, deviceId: string) => string;
+  ttlSeconds: number;
+  gracePeriodSeconds: number;
+  findUser: (userId: string) => Promise<TUser | null>;
+  isActive: (user: TUser) => boolean;
+}
+
+export interface RotateRefreshTokenResult<TUser> {
+  userId: string;
+  deviceId: string;
+  refreshToken: string;
+  user: TUser;
+  /** false when this call served a replayed previous_token during the grace window rather than issuing a new one */
+  rotated: boolean;
+}
+
 export interface RefreshTokenPayload {
   token: string;
   previous_token?: string;
@@ -104,4 +128,33 @@ export interface RefreshTokenPayload {
   role?: string;
   device_pixel_ratio: number;
   created_at: string;
+}
+
+export type ImageType = "thumbnail" | "list_image";
+
+export interface ImageFile {
+  filename: string;
+  data: Buffer;
+  mime_type: string;
+}
+
+export interface ParsedProductRow {
+  rowNumber: number;
+  name: string;
+  description: string;
+  price: string;
+  stock_quantity: number;
+  category_slug: string;
+  thumbnail_filename: string | null;
+  list_image_filename: string | null;
+}
+
+export interface RowError {
+  row: number;
+  message: string;
+}
+
+export interface ParseResult {
+  validRows: ParsedProductRow[];
+  errors: RowError[];
 }

@@ -1,5 +1,5 @@
 import * as grpc from "@grpc/grpc-js";
-import { getCustomerPackage } from "@shared/proto-loader";
+import { getCustomerPackage } from "@shared/grpc/proto-loader";
 import {
   registerCustomer,
   loginCustomer,
@@ -19,6 +19,8 @@ import {
   listPublicProducts,
   getPublicProduct,
 } from "../handlers/public.handlers";
+import { healthCheck } from "../handlers/system.handlers";
+import { withGrpcMetrics } from "@infrastructure/observability/metrics";
 
 export function createServer(): grpc.Server {
   const server = new grpc.Server();
@@ -26,20 +28,23 @@ export function createServer(): grpc.Server {
   const Service = pkg["CustomerService"] as any;
 
   server.addService(Service.service, {
-    RegisterCustomer: registerCustomer,
-    LoginCustomer: loginCustomer,
-    OAuthLogin: oAuthLogin,
-    RefreshToken: refreshCustomerToken,
-    LogoutCustomer: logoutCustomer,
-    GetProfile: getProfile,
-    UpdateProfile: updateProfile,
-    AddToCart: addToCart,
-    UpdateCartItem: updateCartItem,
-    RemoveFromCart: removeFromCart,
-    GetCart: getCart,
-    ListCategories: listPublicCategories,
-    ListProducts: listPublicProducts,
-    GetProduct: getPublicProduct,
+    RegisterCustomer: withGrpcMetrics("RegisterCustomer", registerCustomer),
+    LoginCustomer: withGrpcMetrics("LoginCustomer", loginCustomer),
+    OAuthLogin: withGrpcMetrics("OAuthLogin", oAuthLogin),
+    RefreshToken: withGrpcMetrics("RefreshToken", refreshCustomerToken),
+    LogoutCustomer: withGrpcMetrics("LogoutCustomer", logoutCustomer),
+    GetProfile: withGrpcMetrics("GetProfile", getProfile),
+    UpdateProfile: withGrpcMetrics("UpdateProfile", updateProfile),
+    AddToCart: withGrpcMetrics("AddToCart", addToCart),
+    UpdateCartItem: withGrpcMetrics("UpdateCartItem", updateCartItem),
+    RemoveFromCart: withGrpcMetrics("RemoveFromCart", removeFromCart),
+    GetCart: withGrpcMetrics("GetCart", getCart),
+    ListCategories: withGrpcMetrics("ListCategories", listPublicCategories),
+    ListProducts: withGrpcMetrics("ListProducts", listPublicProducts),
+    GetProduct: withGrpcMetrics("GetProduct", getPublicProduct),
+
+    // void-returning, not Promise-based — see admin-service/src/grpc/server.ts
+    HealthCheck: healthCheck,
   });
 
   return server;

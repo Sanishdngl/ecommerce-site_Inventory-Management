@@ -1,15 +1,15 @@
-import * as grpc from "@grpc/grpc-js";
-
 const mockExecute = jest.fn();
 const mockCacheGet = jest.fn();
 const mockCacheSet = jest.fn();
 const mockCacheDel = jest.fn();
 
-jest.mock("@shared/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
-jest.mock("@shared/audit", () => ({
+jest.mock("@infrastructure/database/mysql", () => ({
+  getDb: () => ({ execute: mockExecute }),
+}));
+jest.mock("@infrastructure/observability/audit", () => ({
   writeAuditLog: jest.fn().mockResolvedValue(undefined),
 }));
-jest.mock("@shared/redis", () => ({
+jest.mock("@infrastructure/redis/redis", () => ({
   cacheGet: (...args: any[]) => mockCacheGet(...args),
   cacheSet: (...args: any[]) => mockCacheSet(...args),
   cacheDel: (...args: any[]) => mockCacheDel(...args),
@@ -70,7 +70,7 @@ describe("createCategory", () => {
     const callback = jest.fn();
     await expect(
       createCategory(makeCall({ name: "", slug: "" }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws ALREADY_EXISTS on duplicate slug", async () => {
@@ -79,7 +79,7 @@ describe("createCategory", () => {
     const callback = jest.fn();
     await expect(
       createCategory(makeCall({ name: "Shirts", slug: "shirts" }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.ALREADY_EXISTS });
+    ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 });
 

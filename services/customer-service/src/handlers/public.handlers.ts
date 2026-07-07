@@ -1,17 +1,26 @@
 import { handle } from "@shared/errors";
-import { callInventory } from "../grpc-clients/inventory.client";
+import { callGrpc } from "@shared/grpc/call-grpc";
+import { getInventoryClient } from "@shared/grpc/inventory.client";
 
 export const listPublicCategories = handle(async (call, callback) => {
-  const result = await callInventory("ListCategories", {});
+  const result = await callGrpc(getInventoryClient(), "ListCategories", {});
   callback(null, result);
 });
 
 export const listPublicProducts = handle(async (call, callback) => {
-  const result = await callInventory("ListProducts", call.request as any);
+  const result = await callGrpc(
+    getInventoryClient(),
+    "ListProducts",
+    call.request as any
+  );
   callback(null, result);
 });
 
 export const getPublicProduct = handle(async (call, callback) => {
-  const result = await callInventory("GetProduct", call.request as any);
+  const result = await callGrpc(
+    getInventoryClient(),
+    "GetProduct",
+    call.request as any
+  );
   callback(null, result);
 });

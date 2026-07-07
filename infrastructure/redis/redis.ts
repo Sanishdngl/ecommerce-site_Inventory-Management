@@ -1,8 +1,14 @@
 import Redis from "ioredis";
+import { logger } from "@infrastructure/observability/logger";
+import { cacheHits, cacheMisses } from "@infrastructure/observability/metrics";
+
+const SERVICE_NAME = process.env.SERVICE_NAME ?? "unknown-service";
 
 let client: Redis | null = null;
 
-export function getRedis(): Redis {
+// Not exported — every consumer goes through the cache* helpers below,
+// which is the only reason a client is ever needed.
+function getRedis(): Redis {
   if (client) return client;
 
   const { REDIS_HOST, REDIS_PORT } = process.env;
@@ -19,7 +25,9 @@ export function getRedis(): Redis {
   });
 
   client.on("error", (err) => {
-    console.error("[redis] connection error:", err.message);
+    logger.error(SERVICE_NAME, "Redis connection error", {
+      error: err.message,
+    });
   });
 
   return client;
@@ -31,10 +39,20 @@ export async function testRedisConnection(): Promise<void> {
   await redis.ping();
 }
 
+// key_type is the segment before the first ':' (e.g. "product", "cart") —
+// bounded cardinality, matches the CacheKey namespaces below.
+function keyType(key: string): string {
+  return key.split(":", 1)[0];
+}
+
 export async function cacheGet<T>(key: string): Promise<T | null> {
   const redis = getRedis();
   const raw = await redis.get(key);
-  if (!raw) return null;
+  if (!raw) {
+    cacheMisses.inc({ key_type: keyType(key) });
+    return null;
+  }
+  cacheHits.inc({ key_type: keyType(key) });
   return JSON.parse(raw) as T;
 }
 
@@ -51,6 +69,28 @@ export async function cacheDel(...keys: string[]): Promise<void> {
   if (keys.length === 0) return;
   const redis = getRedis();
   await redis.del(...keys);
+}
+
+// Delete keys matching a pattern using SCAN (non-blocking).
+// Used when the exact cache keys aren't known (e.g. paginated list caches).
+export async function cacheDelPattern(pattern: string): Promise<void> {
+  const redis = getRedis();
+  const keys: string[] = [];
+  let cursor = "0";
+
+  do {
+    const [next, batch] = await redis.scan(
+      cursor,
+      "MATCH",
+      pattern,
+      "COUNT",
+      100
+    );
+    cursor = next;
+    keys.push(...batch);
+  } while (cursor !== "0");
+
+  if (keys.length > 0) await redis.del(...keys);
 }
 
 export const TTL = {
@@ -70,6 +110,12 @@ export const CacheKey = {
     `products:list:${categoryId}:${page}:${limit}`,
   productListAll: (page = 1, limit = 20) =>
     `products:list:all:${page}:${limit}`,
+
+  // Only page 1 is cached. Match all cached page-1 variants regardless of
+  // the requested `limit` so writes can invalidate them all.
+  productListPattern: (categoryId: string) => `products:list:${categoryId}:1:*`,
+  productListAllPattern: () => `products:list:all:1:*`,
+
   categoriesAll: () => `categories:all`,
   stock: (productId: string) => `stock:${productId}`,
   cart: (customerId: string) => `cart:${customerId}`,

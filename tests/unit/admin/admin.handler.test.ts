@@ -1,19 +1,31 @@
-import * as grpc from "@grpc/grpc-js";
-
 const mockExecute = jest.fn();
-jest.mock("@shared/db", () => ({
+const mockCacheSet = jest.fn().mockResolvedValue(undefined);
+const mockCacheGet = jest.fn();
+const mockCacheDel = jest.fn().mockResolvedValue(undefined);
+jest.mock("@infrastructure/database/mysql", () => ({
   getDb: () => ({ execute: mockExecute }),
 }));
 
-jest.mock("@shared/audit", () => ({
+jest.mock("@infrastructure/observability/audit", () => ({
   writeAuditLog: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock("@shared/password", () => ({
+jest.mock("@shared/auth/password", () => ({
   hashPassword: jest
     .fn()
     .mockResolvedValue("'TEST_HASH_NOT_A_REAL_BCRYPT_VALUE'"),
   verifyPassword: jest.fn(),
+}));
+
+jest.mock("@infrastructure/redis/redis", () => ({
+  cacheSet: (...args: any[]) => mockCacheSet(...args),
+  cacheGet: (...args: any[]) => mockCacheGet(...args),
+  cacheDel: (...args: any[]) => mockCacheDel(...args),
+  TTL: { REFRESH_TOKEN_ADMIN: 30 * 24 * 60 * 60, REFRESH_GRACE_PERIOD: 60 },
+  CacheKey: {
+    refreshAdmin: (adminId: string, deviceId: string) =>
+      `refresh:admin:${adminId}:${deviceId}`,
+  },
 }));
 
 jest.mock("@shared/errors", () => {
@@ -24,12 +36,14 @@ jest.mock("@shared/errors", () => {
   };
 });
 
-import { verifyPassword } from "@shared/password";
-import { writeAuditLog } from "@shared/audit";
+import { verifyPassword } from "../../../shared/src/auth/password";
+import { generateRefreshToken } from "../../../shared/src/auth/refresh-token";
+import { writeAuditLog } from "../../../infrastructure/observability/audit";
 import {
   loginAdmin,
+  logoutAdmin,
+  refreshAdminToken,
   createAdminUser,
-  updateAdminUser,
   deleteAdminUser,
   toggleAdminStatus,
   listAdminUsersHandler,
@@ -68,7 +82,12 @@ describe("loginAdmin", () => {
 
     const callback = jest.fn();
     await loginAdmin(
-      makeCall({ username: "testadmin", password: "pass123" }),
+      makeCall({
+        username: "testadmin",
+        password: "pass123",
+        device_id: "device-1",
+        device_pixel_ratio: 1,
+      }),
       callback
     );
 
@@ -84,7 +103,7 @@ describe("loginAdmin", () => {
     const callback = jest.fn();
     await expect(
       loginAdmin(makeCall({ username: "", password: "" }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws UNAUTHENTICATED when user not found", async () => {
@@ -92,8 +111,16 @@ describe("loginAdmin", () => {
 
     const callback = jest.fn();
     await expect(
-      loginAdmin(makeCall({ username: "nobody", password: "pass" }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.UNAUTHENTICATED });
+      loginAdmin(
+        makeCall({
+          username: "nobody",
+          password: "pass",
+          device_id: "device-1",
+          device_pixel_ratio: 1,
+        }),
+        callback
+      )
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("throws UNAUTHENTICATED when user is inactive", async () => {
@@ -102,10 +129,15 @@ describe("loginAdmin", () => {
     const callback = jest.fn();
     await expect(
       loginAdmin(
-        makeCall({ username: "testadmin", password: "pass" }),
+        makeCall({
+          username: "testadmin",
+          password: "pass",
+          device_id: "device-1",
+          device_pixel_ratio: 1,
+        }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.UNAUTHENTICATED });
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("throws UNAUTHENTICATED on wrong password", async () => {
@@ -115,10 +147,15 @@ describe("loginAdmin", () => {
     const callback = jest.fn();
     await expect(
       loginAdmin(
-        makeCall({ username: "testadmin", password: "wrong" }),
+        makeCall({
+          username: "testadmin",
+          password: "wrong",
+          device_id: "device-1",
+          device_pixel_ratio: 1,
+        }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.UNAUTHENTICATED });
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("does not expose password_hash in response", async () => {
@@ -127,7 +164,12 @@ describe("loginAdmin", () => {
 
     const callback = jest.fn();
     await loginAdmin(
-      makeCall({ username: "testadmin", password: "pass" }),
+      makeCall({
+        username: "testadmin",
+        password: "pass",
+        device_id: "device-1",
+        device_pixel_ratio: 1,
+      }),
       callback
     );
 
@@ -139,7 +181,10 @@ describe("loginAdmin", () => {
 describe("createAdminUser", () => {
   beforeEach(() => jest.clearAllMocks());
 
-  const meta = { admin_id: "super-1", role: "super_admin" };
+  const meta = {
+    admin_id: "11111111-1111-4111-8111-111111111111",
+    role: "super_admin",
+  };
 
   it("creates user successfully", async () => {
     const newUser = makeAdminUser({ role: "maintainer" });
@@ -156,8 +201,8 @@ describe("createAdminUser", () => {
         {
           username: "newadmin",
           email: "new@test.com",
-          password: "pass123",
-          role: "maintainer",
+          password: "password123",
+          role: "MAINTAINER",
         },
         meta
       ),
@@ -181,14 +226,14 @@ describe("createAdminUser", () => {
           {
             username: "x",
             email: "x@x.com",
-            password: "pass",
-            role: "maintainer",
+            password: "password123",
+            role: "MAINTAINER",
           },
           { admin_id: "a1", role: "maintainer" }
         ),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.PERMISSION_DENIED });
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("throws INVALID_ARGUMENT when required fields missing", async () => {
@@ -198,7 +243,7 @@ describe("createAdminUser", () => {
         makeCall({ username: "", email: "", password: "", role: "" }, meta),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws INVALID_ARGUMENT when role is super_admin", async () => {
@@ -209,14 +254,14 @@ describe("createAdminUser", () => {
           {
             username: "x",
             email: "x@x.com",
-            password: "pass",
-            role: "super_admin",
+            password: "password123",
+            role: "SUPER_ADMIN",
           },
           meta
         ),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws ALREADY_EXISTS on duplicate username", async () => {
@@ -229,14 +274,14 @@ describe("createAdminUser", () => {
           {
             username: "testadmin",
             email: "new@test.com",
-            password: "pass",
-            role: "maintainer",
+            password: "password123",
+            role: "MAINTAINER",
           },
           meta
         ),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.ALREADY_EXISTS });
+    ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("throws ALREADY_EXISTS on duplicate email", async () => {
@@ -251,30 +296,36 @@ describe("createAdminUser", () => {
           {
             username: "newuser",
             email: "admin@test.com",
-            password: "pass",
-            role: "maintainer",
+            password: "password123",
+            role: "MAINTAINER",
           },
           meta
         ),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.ALREADY_EXISTS });
+    ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 });
 
 describe("deleteAdminUser", () => {
   beforeEach(() => jest.clearAllMocks());
 
-  const meta = { admin_id: "super-1", role: "super_admin" };
+  const meta = {
+    admin_id: "11111111-1111-4111-8111-111111111111",
+    role: "super_admin",
+  };
 
   it("deletes user and writes audit log", async () => {
-    const user = makeAdminUser({ id: "target-1" });
+    const user = makeAdminUser({ id: "22222222-2222-4222-8222-222222222222" });
     mockExecute
       .mockResolvedValueOnce([[user]]) // findById
       .mockResolvedValueOnce([{ affectedRows: 1 }]); // delete
 
     const callback = jest.fn();
-    await deleteAdminUser(makeCall({ id: "target-1" }, meta), callback);
+    await deleteAdminUser(
+      makeCall({ id: "22222222-2222-4222-8222-222222222222" }, meta),
+      callback
+    );
 
     expect(callback).toHaveBeenCalledWith(
       null,
@@ -287,13 +338,16 @@ describe("deleteAdminUser", () => {
   });
 
   it("throws PERMISSION_DENIED when deleting own account", async () => {
-    const user = makeAdminUser({ id: "super-1" });
+    const user = makeAdminUser({ id: "11111111-1111-4111-8111-111111111111" });
     mockExecute.mockResolvedValueOnce([[user]]);
 
     const callback = jest.fn();
     await expect(
-      deleteAdminUser(makeCall({ id: "super-1" }, meta), callback)
-    ).rejects.toMatchObject({ code: grpc.status.PERMISSION_DENIED });
+      deleteAdminUser(
+        makeCall({ id: "11111111-1111-4111-8111-111111111111" }, meta),
+        callback
+      )
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("throws NOT_FOUND when user does not exist", async () => {
@@ -301,35 +355,50 @@ describe("deleteAdminUser", () => {
 
     const callback = jest.fn();
     await expect(
-      deleteAdminUser(makeCall({ id: "ghost" }, meta), callback)
-    ).rejects.toMatchObject({ code: grpc.status.NOT_FOUND });
+      deleteAdminUser(
+        makeCall({ id: "00000000-0000-4000-8000-000000000000" }, meta),
+        callback
+      )
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("throws PERMISSION_DENIED when caller is not super_admin", async () => {
     const callback = jest.fn();
     await expect(
       deleteAdminUser(
-        makeCall({ id: "target-1" }, { admin_id: "a1", role: "maintainer" }),
+        makeCall(
+          { id: "22222222-2222-4222-8222-222222222222" },
+          { admin_id: "a1", role: "maintainer" }
+        ),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.PERMISSION_DENIED });
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });
 
 describe("toggleAdminStatus", () => {
   beforeEach(() => jest.clearAllMocks());
 
-  const meta = { admin_id: "super-1", role: "super_admin" };
+  const meta = {
+    admin_id: "11111111-1111-4111-8111-111111111111",
+    role: "super_admin",
+  };
 
   it("toggles status and writes audit log with before/after", async () => {
-    const user = makeAdminUser({ id: "target-1", is_active: true });
+    const user = makeAdminUser({
+      id: "22222222-2222-4222-8222-222222222222",
+      is_active: true,
+    });
     mockExecute
       .mockResolvedValueOnce([[user]]) //findById
       .mockResolvedValueOnce([{ affectedRows: 1 }]) //toggle update
       .mockResolvedValueOnce([[user]]); // findById inside
 
     const callback = jest.fn();
-    await toggleAdminStatus(makeCall({ id: "target-1" }, meta), callback);
+    await toggleAdminStatus(
+      makeCall({ id: "22222222-2222-4222-8222-222222222222" }, meta),
+      callback
+    );
 
     expect(writeAuditLog).toHaveBeenCalledWith(
       expect.anything(),
@@ -340,13 +409,16 @@ describe("toggleAdminStatus", () => {
   });
 
   it("throws PERMISSION_DENIED when toggling own account", async () => {
-    const user = makeAdminUser({ id: "super-1" });
+    const user = makeAdminUser({ id: "11111111-1111-4111-8111-111111111111" });
     mockExecute.mockResolvedValueOnce([[user]]);
 
     const callback = jest.fn();
     await expect(
-      toggleAdminStatus(makeCall({ id: "super-1" }, meta), callback)
-    ).rejects.toMatchObject({ code: grpc.status.PERMISSION_DENIED });
+      toggleAdminStatus(
+        makeCall({ id: "11111111-1111-4111-8111-111111111111" }, meta),
+        callback
+      )
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });
 
@@ -400,5 +472,196 @@ describe("listAdminUsersHandler", () => {
 
     const returned = callback.mock.calls[0][1];
     returned.users.forEach((u: any) => expect(u.password_hash).toBeUndefined());
+  });
+});
+
+describe("logoutAdmin", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("deletes the cached refresh token when given a valid token", async () => {
+    const token = generateRefreshToken("admin-1", "device-1");
+
+    const callback = jest.fn();
+    await logoutAdmin(makeCall({ refresh_token: token }), callback);
+
+    expect(mockCacheDel).toHaveBeenCalledWith("refresh:admin:admin-1:device-1");
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ success: true })
+    );
+  });
+
+  it("succeeds without deleting anything when no refresh_token is given", async () => {
+    const callback = jest.fn();
+    await logoutAdmin(makeCall({}), callback);
+
+    expect(mockCacheDel).not.toHaveBeenCalled();
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ success: true })
+    );
+  });
+
+  it("succeeds without deleting anything when refresh_token is malformed", async () => {
+    const callback = jest.fn();
+    await logoutAdmin(
+      makeCall({ refresh_token: "not-a-real-token" }),
+      callback
+    );
+
+    expect(mockCacheDel).not.toHaveBeenCalled();
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ success: true })
+    );
+  });
+});
+
+describe("refreshAdminToken", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("throws BAD_REQUEST when refresh_token is missing", async () => {
+    const callback = jest.fn();
+    await expect(
+      refreshAdminToken(makeCall({}), callback)
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("throws UNAUTHORIZED when refresh_token is malformed", async () => {
+    const callback = jest.fn();
+    await expect(
+      refreshAdminToken(
+        makeCall({ refresh_token: "not-a-real-token" }),
+        callback
+      )
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("throws UNAUTHORIZED when no cache entry exists (expired/invalid)", async () => {
+    const token = generateRefreshToken("admin-1", "device-1");
+    mockCacheGet.mockResolvedValueOnce(undefined);
+
+    const callback = jest.fn();
+    await expect(
+      refreshAdminToken(makeCall({ refresh_token: token }), callback)
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("throws UNAUTHORIZED when token matches neither current nor previous", async () => {
+    const token = generateRefreshToken("admin-1", "device-1");
+    mockCacheGet.mockResolvedValueOnce(
+      JSON.stringify({
+        token: "some-other-current-token",
+        role: "super_admin",
+        device_pixel_ratio: 1,
+        created_at: new Date().toISOString(),
+      })
+    );
+
+    const callback = jest.fn();
+    await expect(
+      refreshAdminToken(makeCall({ refresh_token: token }), callback)
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("throws UNAUTHORIZED and evicts the cache key when the admin is gone or deactivated", async () => {
+    const token = generateRefreshToken("admin-1", "device-1");
+    mockCacheGet.mockResolvedValueOnce(
+      JSON.stringify({
+        token,
+        role: "super_admin",
+        device_pixel_ratio: 1,
+        created_at: new Date().toISOString(),
+      })
+    );
+    mockExecute.mockResolvedValueOnce([[]]); // findAdminById -> not found
+
+    const callback = jest.fn();
+    await expect(
+      refreshAdminToken(makeCall({ refresh_token: token }), callback)
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+
+    expect(mockCacheDel).toHaveBeenCalledWith("refresh:admin:admin-1:device-1");
+  });
+
+  it("rotates the token and returns a new refresh_token on the current token", async () => {
+    const token = generateRefreshToken("admin-1", "device-1");
+    mockCacheGet.mockResolvedValueOnce(
+      JSON.stringify({
+        token,
+        role: "super_admin",
+        device_pixel_ratio: 2,
+        created_at: new Date().toISOString(),
+      })
+    );
+    mockExecute.mockResolvedValueOnce([[makeAdminUser()]]); // findAdminById
+
+    const callback = jest.fn();
+    await refreshAdminToken(makeCall({ refresh_token: token }), callback);
+
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({
+        admin_id: "admin-1",
+        role: "SUPER_ADMIN",
+        refresh_token: expect.any(String),
+        user: expect.objectContaining({ id: "admin-1" }),
+      })
+    );
+    const [, response] = callback.mock.calls[0];
+    expect(response.refresh_token).not.toBe(token); // rotated, not reused
+
+    expect(mockCacheSet).toHaveBeenCalledWith(
+      "refresh:admin:admin-1:device-1",
+      expect.stringContaining(response.refresh_token),
+      30 * 24 * 60 * 60
+    );
+  });
+
+  it("returns the still-current token without rotating during the previous-token grace period", async () => {
+    const oldToken = generateRefreshToken("admin-1", "device-1");
+    const newToken = generateRefreshToken("admin-1", "device-1");
+    mockCacheGet.mockResolvedValueOnce(
+      JSON.stringify({
+        token: newToken,
+        previous_token: oldToken,
+        previous_token_expires_at: Date.now() + 30_000, // still within grace period
+        role: "super_admin",
+        device_pixel_ratio: 1,
+        created_at: new Date().toISOString(),
+      })
+    );
+    mockExecute.mockResolvedValueOnce([[makeAdminUser()]]);
+
+    const callback = jest.fn();
+    await refreshAdminToken(makeCall({ refresh_token: oldToken }), callback);
+
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({
+        admin_id: "admin-1",
+        refresh_token: newToken,
+      })
+    );
+    expect(mockCacheSet).not.toHaveBeenCalled();
+  });
+
+  it("does not expose password_hash on rotation", async () => {
+    const token = generateRefreshToken("admin-1", "device-1");
+    mockCacheGet.mockResolvedValueOnce(
+      JSON.stringify({
+        token,
+        role: "super_admin",
+        device_pixel_ratio: 1,
+        created_at: new Date().toISOString(),
+      })
+    );
+    mockExecute.mockResolvedValueOnce([[makeAdminUser()]]);
+
+    const callback = jest.fn();
+    await refreshAdminToken(makeCall({ refresh_token: token }), callback);
+
+    const [, response] = callback.mock.calls[0];
+    expect(response.user.password_hash).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import { CacheKey, TTL } from "../../../shared/src/redis";
+import { CacheKey, TTL } from "../../../infrastructure/redis/redis";
 
 describe("CacheKey builders", () => {
   it("product key", () => {

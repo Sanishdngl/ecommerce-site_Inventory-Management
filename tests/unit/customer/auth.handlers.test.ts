@@ -1,8 +1,24 @@
-import * as grpc from "@grpc/grpc-js";
-
 const mockExecute = jest.fn();
-jest.mock("@shared/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
-jest.mock("@shared/password", () => ({
+const mockCacheSet = jest.fn().mockResolvedValue(undefined);
+const mockCacheGet = jest.fn();
+const mockCacheDel = jest.fn().mockResolvedValue(undefined);
+jest.mock("@infrastructure/database/mysql", () => ({
+  getDb: () => ({ execute: mockExecute }),
+}));
+jest.mock("@infrastructure/redis/redis", () => ({
+  cacheSet: (...args: any[]) => mockCacheSet(...args),
+  cacheGet: (...args: any[]) => mockCacheGet(...args),
+  cacheDel: (...args: any[]) => mockCacheDel(...args),
+  TTL: {
+    REFRESH_TOKEN_CUSTOMER: 30 * 24 * 60 * 60,
+    REFRESH_GRACE_PERIOD: 60,
+  },
+  CacheKey: {
+    refreshCustomer: (customerId: string, deviceId: string) =>
+      `refresh:customer:${customerId}:${deviceId}`,
+  },
+}));
+jest.mock("@shared/auth/password", () => ({
   hashPassword: jest
     .fn()
     .mockResolvedValue("TEST_HASH_NOT_A_REAL_BCRYPT_VALUE"),
@@ -16,12 +32,15 @@ jest.mock("../../../services/customer-service/src/auth/oauth", () => ({
   verifyOAuthToken: jest.fn(),
 }));
 
-import { verifyPassword } from "@shared/password";
+import { verifyPassword } from "../../../shared/src/auth/password";
+import { generateRefreshToken } from "../../../shared/src/auth/refresh-token";
 import { verifyOAuthToken } from "../../../services/customer-service/src/auth/oauth";
 import {
   registerCustomer,
   loginCustomer,
   oAuthLogin,
+  logoutCustomer,
+  refreshCustomerToken,
 } from "../../../services/customer-service/src/handlers/auth.handlers";
 
 function makeCall(request: any): any {
@@ -61,6 +80,8 @@ describe("registerCustomer", () => {
         password: "password123",
         first_name: "John",
         last_name: "Doe",
+        device_id: "device-1",
+        device_pixel_ratio: 1,
       }),
       callback
     );
@@ -77,7 +98,7 @@ describe("registerCustomer", () => {
     const callback = jest.fn();
     await expect(
       registerCustomer(makeCall({ email: "x@x.com" }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws INVALID_ARGUMENT when password under 8 characters", async () => {
@@ -89,10 +110,12 @@ describe("registerCustomer", () => {
           password: "short",
           first_name: "A",
           last_name: "B",
+          device_id: "device-1",
+          device_pixel_ratio: 1,
         }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("throws ALREADY_EXISTS when email taken", async () => {
@@ -106,10 +129,12 @@ describe("registerCustomer", () => {
           password: "password123",
           first_name: "A",
           last_name: "B",
+          device_id: "device-1",
+          device_pixel_ratio: 1,
         }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.ALREADY_EXISTS });
+    ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("does not expose password_hash in response", async () => {
@@ -126,6 +151,8 @@ describe("registerCustomer", () => {
         password: "password123",
         first_name: "A",
         last_name: "B",
+        device_id: "device-1",
+        device_pixel_ratio: 1,
       }),
       callback
     );
@@ -144,7 +171,12 @@ describe("loginCustomer", () => {
 
     const callback = jest.fn();
     await loginCustomer(
-      makeCall({ email: "user@test.com", password: "password123" }),
+      makeCall({
+        email: "user@test.com",
+        password: "password123",
+        device_id: "device-1",
+        device_pixel_ratio: 1,
+      }),
       callback
     );
 
@@ -159,7 +191,7 @@ describe("loginCustomer", () => {
   it("throws INVALID_ARGUMENT when fields missing", async () => {
     const callback = jest.fn();
     await expect(loginCustomer(makeCall({}), callback)).rejects.toMatchObject({
-      code: grpc.status.INVALID_ARGUMENT,
+      code: "BAD_REQUEST",
     });
   });
 
@@ -169,10 +201,15 @@ describe("loginCustomer", () => {
     const callback = jest.fn();
     await expect(
       loginCustomer(
-        makeCall({ email: "nobody@test.com", password: "pass" }),
+        makeCall({
+          email: "nobody@test.com",
+          password: "pass",
+          device_id: "device-1",
+          device_pixel_ratio: 1,
+        }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.UNAUTHENTICATED });
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("throws UNAUTHENTICATED when customer is inactive", async () => {
@@ -181,10 +218,15 @@ describe("loginCustomer", () => {
     const callback = jest.fn();
     await expect(
       loginCustomer(
-        makeCall({ email: "user@test.com", password: "pass" }),
+        makeCall({
+          email: "user@test.com",
+          password: "pass",
+          device_id: "device-1",
+          device_pixel_ratio: 1,
+        }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.UNAUTHENTICATED });
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("throws UNAUTHENTICATED when password_hash is null — OAuth-only account", async () => {
@@ -195,10 +237,15 @@ describe("loginCustomer", () => {
     const callback = jest.fn();
     await expect(
       loginCustomer(
-        makeCall({ email: "user@test.com", password: "pass" }),
+        makeCall({
+          email: "user@test.com",
+          password: "pass",
+          device_id: "device-1",
+          device_pixel_ratio: 1,
+        }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.UNAUTHENTICATED });
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("throws UNAUTHENTICATED on wrong password", async () => {
@@ -208,10 +255,15 @@ describe("loginCustomer", () => {
     const callback = jest.fn();
     await expect(
       loginCustomer(
-        makeCall({ email: "user@test.com", password: "wrong" }),
+        makeCall({
+          email: "user@test.com",
+          password: "wrong",
+          device_id: "device-1",
+          device_pixel_ratio: 1,
+        }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.UNAUTHENTICATED });
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 });
 
@@ -221,7 +273,7 @@ describe("oAuthLogin", () => {
   it("throws INVALID_ARGUMENT when fields missing", async () => {
     const callback = jest.fn();
     await expect(oAuthLogin(makeCall({}), callback)).rejects.toMatchObject({
-      code: grpc.status.INVALID_ARGUMENT,
+      code: "BAD_REQUEST",
     });
   });
 
@@ -232,8 +284,16 @@ describe("oAuthLogin", () => {
 
     const callback = jest.fn();
     await expect(
-      oAuthLogin(makeCall({ provider: "google", token: "bad" }), callback)
-    ).rejects.toMatchObject({ code: grpc.status.UNAUTHENTICATED });
+      oAuthLogin(
+        makeCall({
+          provider: "google",
+          token: "bad",
+          device_id: "device-1",
+          device_pixel_ratio: 1,
+        }),
+        callback
+      )
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("returns existing customer on valid OAuth token", async () => {
@@ -252,7 +312,12 @@ describe("oAuthLogin", () => {
 
     const callback = jest.fn();
     await oAuthLogin(
-      makeCall({ provider: "google", token: "valid-token" }),
+      makeCall({
+        provider: "google",
+        token: "valid-token",
+        device_id: "device-1",
+        device_pixel_ratio: 1,
+      }),
       callback
     );
 
@@ -284,7 +349,12 @@ describe("oAuthLogin", () => {
 
     const callback = jest.fn();
     await oAuthLogin(
-      makeCall({ provider: "google", token: "valid-token" }),
+      makeCall({
+        provider: "google",
+        token: "valid-token",
+        device_id: "device-1",
+        device_pixel_ratio: 1,
+      }),
       callback
     );
 
@@ -309,9 +379,203 @@ describe("oAuthLogin", () => {
     const callback = jest.fn();
     await expect(
       oAuthLogin(
-        makeCall({ provider: "google", token: "valid-token" }),
+        makeCall({
+          provider: "google",
+          token: "valid-token",
+          device_id: "device-1",
+          device_pixel_ratio: 1,
+        }),
         callback
       )
-    ).rejects.toMatchObject({ code: grpc.status.UNAUTHENTICATED });
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+});
+
+describe("logoutCustomer", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("deletes the cached refresh token when given a valid token", async () => {
+    const token = generateRefreshToken("cust-1", "device-1");
+
+    const callback = jest.fn();
+    await logoutCustomer(makeCall({ refresh_token: token }), callback);
+
+    expect(mockCacheDel).toHaveBeenCalledWith(
+      "refresh:customer:cust-1:device-1"
+    );
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ success: true })
+    );
+  });
+
+  it("succeeds without deleting anything when no refresh_token is given", async () => {
+    const callback = jest.fn();
+    await logoutCustomer(makeCall({}), callback);
+
+    expect(mockCacheDel).not.toHaveBeenCalled();
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ success: true })
+    );
+  });
+
+  it("succeeds without deleting anything when refresh_token is malformed", async () => {
+    const callback = jest.fn();
+    await logoutCustomer(
+      makeCall({ refresh_token: "not-a-real-token" }),
+      callback
+    );
+
+    expect(mockCacheDel).not.toHaveBeenCalled();
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ success: true })
+    );
+  });
+});
+
+describe("refreshCustomerToken", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("throws BAD_REQUEST when refresh_token is missing", async () => {
+    const callback = jest.fn();
+    await expect(
+      refreshCustomerToken(makeCall({}), callback)
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("throws UNAUTHORIZED when refresh_token is malformed", async () => {
+    const callback = jest.fn();
+    await expect(
+      refreshCustomerToken(
+        makeCall({ refresh_token: "not-a-real-token" }),
+        callback
+      )
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("throws UNAUTHORIZED when no cache entry exists (expired/invalid)", async () => {
+    const token = generateRefreshToken("cust-1", "device-1");
+    mockCacheGet.mockResolvedValueOnce(undefined);
+
+    const callback = jest.fn();
+    await expect(
+      refreshCustomerToken(makeCall({ refresh_token: token }), callback)
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("throws UNAUTHORIZED when token matches neither current nor previous", async () => {
+    const token = generateRefreshToken("cust-1", "device-1");
+    mockCacheGet.mockResolvedValueOnce(
+      JSON.stringify({
+        token: "some-other-current-token",
+        device_pixel_ratio: 1,
+        created_at: new Date().toISOString(),
+      })
+    );
+
+    const callback = jest.fn();
+    await expect(
+      refreshCustomerToken(makeCall({ refresh_token: token }), callback)
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("throws UNAUTHORIZED and evicts the cache key when the customer is gone or inactive", async () => {
+    const token = generateRefreshToken("cust-1", "device-1");
+    mockCacheGet.mockResolvedValueOnce(
+      JSON.stringify({
+        token,
+        device_pixel_ratio: 1,
+        created_at: new Date().toISOString(),
+      })
+    );
+    mockExecute.mockResolvedValueOnce([[]]); // findCustomerById -> not found
+
+    const callback = jest.fn();
+    await expect(
+      refreshCustomerToken(makeCall({ refresh_token: token }), callback)
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+
+    expect(mockCacheDel).toHaveBeenCalledWith(
+      "refresh:customer:cust-1:device-1"
+    );
+  });
+
+  it("rotates the token and returns a new refresh_token on the current token", async () => {
+    const token = generateRefreshToken("cust-1", "device-1");
+    mockCacheGet.mockResolvedValueOnce(
+      JSON.stringify({
+        token,
+        device_pixel_ratio: 2,
+        created_at: new Date().toISOString(),
+      })
+    );
+    mockExecute.mockResolvedValueOnce([[makeCustomer()]]); // findCustomerById
+
+    const callback = jest.fn();
+    await refreshCustomerToken(makeCall({ refresh_token: token }), callback);
+
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({
+        customer_id: "cust-1",
+        refresh_token: expect.any(String),
+        customer: expect.objectContaining({ id: "cust-1" }),
+      })
+    );
+    const [, response] = callback.mock.calls[0];
+    expect(response.refresh_token).not.toBe(token); // rotated, not reused
+
+    expect(mockCacheSet).toHaveBeenCalledWith(
+      "refresh:customer:cust-1:device-1",
+      expect.stringContaining(response.refresh_token),
+      30 * 24 * 60 * 60
+    );
+  });
+
+  it("returns the still-current token without rotating during the previous-token grace period", async () => {
+    const oldToken = generateRefreshToken("cust-1", "device-1");
+    const newToken = generateRefreshToken("cust-1", "device-1");
+    mockCacheGet.mockResolvedValueOnce(
+      JSON.stringify({
+        token: newToken,
+        previous_token: oldToken,
+        previous_token_expires_at: Date.now() + 30_000, // still within grace period
+        device_pixel_ratio: 1,
+        created_at: new Date().toISOString(),
+      })
+    );
+    mockExecute.mockResolvedValueOnce([[makeCustomer()]]);
+
+    const callback = jest.fn();
+    await refreshCustomerToken(makeCall({ refresh_token: oldToken }), callback);
+
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({
+        customer_id: "cust-1",
+        refresh_token: newToken,
+      })
+    );
+    expect(mockCacheSet).not.toHaveBeenCalled();
+  });
+
+  it("does not expose password_hash on rotation", async () => {
+    const token = generateRefreshToken("cust-1", "device-1");
+    mockCacheGet.mockResolvedValueOnce(
+      JSON.stringify({
+        token,
+        device_pixel_ratio: 1,
+        created_at: new Date().toISOString(),
+      })
+    );
+    mockExecute.mockResolvedValueOnce([[makeCustomer()]]);
+
+    const callback = jest.fn();
+    await refreshCustomerToken(makeCall({ refresh_token: token }), callback);
+
+    const [, response] = callback.mock.calls[0];
+    expect(response.customer.password_hash).toBeUndefined();
   });
 });

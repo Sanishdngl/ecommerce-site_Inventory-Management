@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "gateway"
+    static_configs:
+      - targets: ["gateway:3000"]
+    metrics_path: /metrics
+
+  - job_name: "admin-service"
+    static_configs:
+      - targets: ["admin-service:9101"]
+
+  - job_name: "inventory-service"
+    static_configs:
+      - targets: ["inventory-service:9102"]
+
+  - job_name: "customer-service"
+    static_configs:
+      - targets: ["customer-service:9103"]

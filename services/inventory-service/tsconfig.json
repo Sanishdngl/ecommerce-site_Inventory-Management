@@ -4,9 +4,10 @@
     "outDir": "dist",
     "rootDir": "../..",
     "paths": {
-      "@shared/*": ["../../shared/src/*"]
+      "@shared/*": ["../../shared/src/*"],
+      "@infrastructure/*": ["../../infrastructure/*"]
     }
   },
-  "include": ["src/**/*", "../../shared/src/**/*"],
+  "include": ["src/**/*", "../../shared/src/**/*", "../../infrastructure/**/*"],
   "exclude": ["node_modules", "dist"]
 }

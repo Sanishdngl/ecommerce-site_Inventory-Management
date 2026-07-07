@@ -2,8 +2,12 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "types": ["jest", "node"],
+    "rootDir": "..",
+    "isolatedModules": true,
+    "ignoreDeprecations": "6.0",
     "paths": {
-      "@shared/*": ["../shared/src/*"]
+      "@shared/*": ["../shared/src/*"],
+      "@infrastructure/*": ["../infrastructure/*"]
     }
   },
   "include": [

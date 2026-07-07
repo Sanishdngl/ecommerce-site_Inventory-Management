@@ -21,6 +21,20 @@ message CreateCategoryRequest {
 
 message ListCategoriesRequest {}   // no filter; returns full list
 
+message GetCategoryRequest {
+  string id = 1;
+}
+
+message UpdateCategoryRequest {
+  string          id   = 1;
+  optional string name = 2;
+  optional string slug = 3;
+}
+
+message DeleteCategoryRequest {
+  string id = 1;
+}
+
 message CategoryResponse {
   Category category = 1;
 }
@@ -87,8 +101,9 @@ message ProductListResponse {
 // Stock 
 
 message UpdateStockRequest {
-  string product_id = 1;
-  int32  delta      = 2;   // positive = add, negative = subtract; service rejects if result < 0
+  string          product_id = 1;
+  int32           delta      = 2;   // positive = add, negative = subtract; service rejects if result < 0
+  optional string reason     = 3;   // free-text audit note, not shown to customers
 }
 
 message StockResponse {
@@ -153,11 +168,24 @@ message ProductListByIdsResponse {
   repeated Product products = 1;
 }
 
+message InventoryStatsRequest {
+  optional int32 low_stock_threshold = 1;   // default 10, applied in-handler
+}
+
+message InventoryStatsResponse {
+  int32 total_products    = 1;
+  int32 total_categories  = 2;
+  int32 low_stock_count   = 3;
+}
+
 // Service
 
 service InventoryService {
   rpc CreateCategory   (CreateCategoryRequest)          returns (CategoryResponse);
   rpc ListCategories   (ListCategoriesRequest)          returns (CategoryListResponse);
+  rpc GetCategory      (GetCategoryRequest)             returns (CategoryResponse);
+  rpc UpdateCategory   (UpdateCategoryRequest)          returns (CategoryResponse);
+  rpc DeleteCategory   (DeleteCategoryRequest)          returns (common.StatusResponse);
 
   rpc CreateProduct    (CreateProductRequest)           returns (ProductResponse);
   rpc UpdateProduct    (UpdateProductRequest)           returns (ProductResponse);
@@ -171,4 +199,7 @@ service InventoryService {
   rpc BulkUploadProducts  (stream BulkUploadChunk)     returns (BulkUploadResponse);
 
   rpc GetProductsByIds    (GetProductsByIdsRequest)       returns (ProductListByIdsResponse);
+
+  rpc GetInventoryStats (InventoryStatsRequest) returns (InventoryStatsResponse);
+  rpc HealthCheck       (common.Empty)          returns (common.HealthStatus);
 }

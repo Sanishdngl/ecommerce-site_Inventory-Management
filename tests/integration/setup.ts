@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 dotenv.config({
   path: path.resolve(process.cwd(), ".env.test.local"),
   override: true,
+  quiet: true,
 });
 
 jest.setTimeout(15000);

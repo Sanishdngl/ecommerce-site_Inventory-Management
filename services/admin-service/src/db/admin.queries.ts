@@ -1,6 +1,7 @@
 import type mysql from "mysql2/promise";
-import { v4 as uuidv4 } from "uuid";
-import { hashPassword } from "@shared/password";
+import { generateId } from "@shared/utils/uuid";
+import { hashPassword } from "@shared/auth/password";
+import { clampPagination } from "@shared/utils/pagination";
 import type { AdminUser, AdminRole } from "@shared/types";
 
 export async function findAdminByUsername(
@@ -45,7 +46,7 @@ export async function insertAdminUser(
     role: AdminRole;
   }
 ): Promise<AdminUser> {
-  const id = uuidv4();
+  const id = generateId();
   const password_hash = await hashPassword(data.password);
   const now = new Date();
 
@@ -62,7 +63,9 @@ export async function insertAdminUser(
 export async function updateAdminUser(
   db: mysql.Pool,
   id: string,
-  data: Partial<Pick<AdminUser, "username" | "email" | "role">>
+  data: Partial<Pick<AdminUser, "username" | "email" | "role">> & {
+    password?: string;
+  }
 ): Promise<AdminUser | null> {
   const fields: string[] = [];
   const values: any[] = [];
@@ -78,6 +81,10 @@ export async function updateAdminUser(
   if (data.role !== undefined) {
     fields.push("role = ?");
     values.push(data.role);
+  }
+  if (data.password !== undefined) {
+    fields.push("password_hash = ?");
+    values.push(await hashPassword(data.password));
   }
 
   if (fields.length === 0) return findAdminById(db, id);
@@ -117,8 +124,7 @@ export async function listAdminUsers(
   page: number,
   limit: number
 ): Promise<{ users: AdminUser[]; total: number }> {
-  const safeLimit = Math.max(1, parseInt(String(limit), 10));
-  const safeOffset = Math.max(0, parseInt(String((page - 1) * limit), 10));
+  const { safeLimit, safeOffset } = clampPagination(page, limit);
 
   const [rows] = await db.execute<any[]>(
     `SELECT * FROM admin_users

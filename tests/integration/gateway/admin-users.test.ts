@@ -1,7 +1,10 @@
 import request from "supertest";
 import app from "../../../gateway/src/app";
 import { loginAsSuperAdmin, adminAuthHeader } from "../helpers/auth";
-import { deleteAdminUserByUsername } from "../helpers/cleanup";
+import {
+  deleteAdminUserByUsername,
+  purgeAdminUserAuditTrail,
+} from "../helpers/cleanup";
 
 let superAdminToken: string;
 let createdUserId: string;
@@ -15,6 +18,14 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // By this point the row is already gone — deleted via the
+  // DELETE /api/admin/users/:id test below — so
+  // deleteAdminUserByUsername's SELECT-by-username lookup finds nothing and
+  // skips its purge. Purge directly by the id captured at creation instead
+  // of relying on a username that no longer resolves to anything.
+  if (createdUserId) {
+    await purgeAdminUserAuditTrail(createdUserId);
+  }
   await deleteAdminUserByUsername(TEST_USERNAME);
 });
 
@@ -49,22 +60,34 @@ describe("GET /api/admin/users", () => {
     expect(createRes.status).toBe(201);
     const maintainerId = createRes.body.user.id;
 
-    const loginRes = await request(app).post("/api/admin/auth/login").send({
-      username: createRes.body.user.username,
-      password: "testpassword123",
-    });
+    try {
+      const loginRes = await request(app).post("/api/admin/auth/login").send({
+        username: createRes.body.user.username,
+        password: "testpassword123",
+        device_id: "integration-test-device",
+        device_pixel_ratio: 1,
+      });
 
-    const maintainerToken = loginRes.body.token;
+      const maintainerToken = loginRes.body.token;
 
-    const listRes = await request(app)
-      .get("/api/admin/users")
-      .set(adminAuthHeader(maintainerToken));
+      const listRes = await request(app)
+        .get("/api/admin/users")
+        .set(adminAuthHeader(maintainerToken));
 
-    expect(listRes.status).toBe(403);
+      expect(listRes.status).toBe(403);
+    } finally {
+      // Runs even if an assertion above throws, so the maintainer row
+      // created at the top of this test never leaks past this `it`.
+      await request(app)
+        .delete(`/api/admin/users/${maintainerId}`)
+        .set(adminAuthHeader(superAdminToken));
 
-    await request(app)
-      .delete(`/api/admin/users/${maintainerId}`)
-      .set(adminAuthHeader(superAdminToken));
+      // The DELETE endpoint hard-deletes the row but writes its own
+      // audit_logs entry (entity_type: 'admin_user', performed_by:
+      // superadmin) referencing maintainerId — nothing purges that on its
+      // own since entity_id has no FK to enforce it.
+      await purgeAdminUserAuditTrail(maintainerId);
+    }
   });
 });
 

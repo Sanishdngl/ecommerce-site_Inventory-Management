@@ -1,6 +1,16 @@
 import { Router } from "express";
-import rateLimit from "express-rate-limit";
 import { customerAuthMiddleware } from "../middleware/auth.middleware";
+import { validate } from "../middleware/validate.middleware";
+import { customerAuthRateLimiter } from "@shared/utils/rate-limits";
+import {
+  RegisterSchema,
+  LoginSchema,
+  OAuthSchema,
+  UpdateProfileSchema,
+  CartItemSchema,
+  UpdateCartQuantitySchema,
+  CartProductParamSchema,
+} from "@shared/validation/customer.schema";
 import {
   registerCustomer,
   loginCustomer,
@@ -17,23 +27,53 @@ import {
 
 const router = Router();
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  message: { message: "Too many attempts — try again later" },
-});
-
-router.post("/auth/register", authLimiter, registerCustomer);
-router.post("/auth/login", authLimiter, loginCustomer);
-router.post("/auth/oauth", authLimiter, oauthLogin);
+router.post(
+  "/auth/register",
+  customerAuthRateLimiter,
+  validate(RegisterSchema),
+  registerCustomer
+);
+router.post(
+  "/auth/login",
+  customerAuthRateLimiter,
+  validate(LoginSchema),
+  loginCustomer
+);
+router.post(
+  "/auth/oauth",
+  customerAuthRateLimiter,
+  validate(OAuthSchema),
+  oauthLogin
+);
 router.post("/auth/refresh", refreshCustomer);
 router.post("/auth/logout", logoutCustomer);
 
 router.get("/profile", customerAuthMiddleware, getProfile);
-router.put("/profile", customerAuthMiddleware, updateProfile);
+router.put(
+  "/profile",
+  customerAuthMiddleware,
+  validate(UpdateProfileSchema.omit({ customer_id: true })),
+  updateProfile
+);
 router.get("/cart", customerAuthMiddleware, getCart);
-router.post("/cart", customerAuthMiddleware, addToCart);
-router.put("/cart/:productId", customerAuthMiddleware, updateCartItem);
-router.delete("/cart/:productId", customerAuthMiddleware, removeFromCart);
+router.post(
+  "/cart",
+  customerAuthMiddleware,
+  validate(CartItemSchema.omit({ customer_id: true })),
+  addToCart
+);
+router.put(
+  "/cart/:productId",
+  customerAuthMiddleware,
+  validate(CartProductParamSchema, "params"),
+  validate(UpdateCartQuantitySchema),
+  updateCartItem
+);
+router.delete(
+  "/cart/:productId",
+  customerAuthMiddleware,
+  validate(CartProductParamSchema, "params"),
+  removeFromCart
+);
 
 export default router;

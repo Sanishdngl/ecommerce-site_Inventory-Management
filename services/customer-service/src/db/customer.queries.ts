@@ -1,5 +1,5 @@
 import type mysql from "mysql2/promise";
-import { v4 as uuidv4 } from "uuid";
+import { generateId } from "@shared/utils/uuid";
 import type { Customer } from "@shared/types";
 
 export async function findCustomerById(
@@ -48,7 +48,7 @@ export async function insertCustomer(
     last_name: string;
   }
 ): Promise<Customer> {
-  const id = uuidv4();
+  const id = generateId();
   const now = new Date();
 
   await db.execute(

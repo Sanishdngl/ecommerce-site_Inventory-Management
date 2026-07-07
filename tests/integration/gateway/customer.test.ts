@@ -8,29 +8,31 @@ import {
 } from "../helpers/auth";
 import {
   deleteCustomerByEmail,
-  deleteCategoryBySlug,
-  deleteProductByName,
+  deleteCategoryById,
+  deleteProductById,
 } from "../helpers/cleanup";
 
 let customerToken: string;
 let customerEmail: string;
 let productId: string;
-let categorySlug: string;
+let categoryId: string;
 
 beforeAll(async () => {
   const { token: adminToken } = await loginAsSuperAdmin();
-  categorySlug = `cart-test-${Date.now()}`;
+  const categorySlug = `cart-test-${Date.now()}`;
 
   const catRes = await request(app)
     .post("/api/admin/inventory/categories")
     .set(adminAuthHeader(adminToken))
     .send({ name: `Cart Test Category ${Date.now()}`, slug: categorySlug });
 
+  categoryId = catRes.body.category.id;
+
   const prodRes = await request(app)
     .post("/api/admin/inventory/products")
     .set(adminAuthHeader(adminToken))
     .send({
-      category_id: catRes.body.category.id,
+      category_id: categoryId,
       name: `Cart Test Product ${Date.now()}`,
       price: "15.00",
       stock_quantity: 50,
@@ -45,8 +47,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await deleteCustomerByEmail(customerEmail);
-  await deleteProductByName(`Cart Test Product`);
-  await deleteCategoryBySlug(categorySlug);
+  await deleteProductById(productId);
+  await deleteCategoryById(categoryId);
 });
 
 describe("POST /api/customer/auth/register", () => {
@@ -60,6 +62,8 @@ describe("POST /api/customer/auth/register", () => {
       password: "password123",
       first_name: "Test",
       last_name: "User",
+      device_id: "integration-test-device",
+      device_pixel_ratio: 1,
     });
 
     expect(res.status).toBe(201);
@@ -74,6 +78,8 @@ describe("POST /api/customer/auth/register", () => {
       password: "password123",
       first_name: "A",
       last_name: "B",
+      device_id: "integration-test-device",
+      device_pixel_ratio: 1,
     });
 
     expect(res.status).toBe(409);
@@ -87,6 +93,22 @@ describe("POST /api/customer/auth/register", () => {
         password: "short",
         first_name: "A",
         last_name: "B",
+        device_id: "integration-test-device",
+        device_pixel_ratio: 1,
+      });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when device_id missing", async () => {
+    const res = await request(app)
+      .post("/api/customer/auth/register")
+      .send({
+        email: `x_${Date.now()}@x.com`,
+        password: "password123",
+        first_name: "A",
+        last_name: "B",
+        device_pixel_ratio: 1,
       });
 
     expect(res.status).toBe(400);
@@ -95,26 +117,35 @@ describe("POST /api/customer/auth/register", () => {
 
 describe("POST /api/customer/auth/login", () => {
   it("logs in with valid credentials", async () => {
-    const res = await request(app)
-      .post("/api/customer/auth/login")
-      .send({ email: customerEmail, password: "testpassword123" });
+    const res = await request(app).post("/api/customer/auth/login").send({
+      email: customerEmail,
+      password: "testpassword123",
+      device_id: "integration-test-device",
+      device_pixel_ratio: 1,
+    });
 
     expect(res.status).toBe(200);
     expect(res.body.token).toBeDefined();
   });
 
   it("returns 401 with wrong password", async () => {
-    const res = await request(app)
-      .post("/api/customer/auth/login")
-      .send({ email: customerEmail, password: "wrongpassword" });
+    const res = await request(app).post("/api/customer/auth/login").send({
+      email: customerEmail,
+      password: "wrongpassword",
+      device_id: "integration-test-device",
+      device_pixel_ratio: 1,
+    });
 
     expect(res.status).toBe(401);
   });
 
   it("returns 401 for non-existent email", async () => {
-    const res = await request(app)
-      .post("/api/customer/auth/login")
-      .send({ email: "nobody@example.com", password: "password123" });
+    const res = await request(app).post("/api/customer/auth/login").send({
+      email: "nobody@example.com",
+      password: "password123",
+      device_id: "integration-test-device",
+      device_pixel_ratio: 1,
+    });
 
     expect(res.status).toBe(401);
   });
