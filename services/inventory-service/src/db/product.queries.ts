@@ -122,19 +122,21 @@ export async function softDeleteProduct(
 export async function listAllProducts(
   db: mysql.Pool,
   page: number,
-  limit: number
+  limit: number,
+  includeInactive = false
 ): Promise<{ products: Product[]; total: number }> {
   const { safeLimit, safeOffset } = clampPagination(page, limit);
+  const where = includeInactive ? "" : "WHERE is_active = true";
 
   const [rows] = await db.execute<any[]>(
     `SELECT * FROM products
-     WHERE is_active = true
+     ${where}
      ORDER BY created_at DESC
      LIMIT ${safeLimit} OFFSET ${safeOffset}`
   );
 
   const [[{ total }]] = await db.execute<any[]>(
-    `SELECT COUNT(*) as total FROM products WHERE is_active = true`
+    `SELECT COUNT(*) as total FROM products ${where}`
   );
 
   return { products: rows, total: Number(total) };
@@ -144,13 +146,15 @@ export async function listProductsByCategory(
   db: mysql.Pool,
   categoryId: string,
   page: number,
-  limit: number
+  limit: number,
+  includeInactive = false
 ): Promise<{ products: Product[]; total: number }> {
   const { safeLimit, safeOffset } = clampPagination(page, limit);
+  const activeClause = includeInactive ? "" : "AND is_active = true";
 
   const [rows] = await db.execute<any[]>(
     `SELECT * FROM products
-     WHERE category_id = ? AND is_active = true
+     WHERE category_id = ? ${activeClause}
      ORDER BY created_at DESC
      LIMIT ${safeLimit} OFFSET ${safeOffset}`,
     [categoryId]
@@ -158,7 +162,7 @@ export async function listProductsByCategory(
 
   const [[{ total }]] = await db.execute<any[]>(
     `SELECT COUNT(*) as total FROM products
-     WHERE category_id = ? AND is_active = true`,
+     WHERE category_id = ? ${activeClause}`,
     [categoryId]
   );
 

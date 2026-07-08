@@ -6,8 +6,6 @@ const SERVICE_NAME = process.env.SERVICE_NAME ?? "unknown-service";
 
 let client: Redis | null = null;
 
-// Not exported — every consumer goes through the cache* helpers below,
-// which is the only reason a client is ever needed.
 function getRedis(): Redis {
   if (client) return client;
 
@@ -111,8 +109,6 @@ export const CacheKey = {
   productListAll: (page = 1, limit = 20) =>
     `products:list:all:${page}:${limit}`,
 
-  // Only page 1 is cached. Match all cached page-1 variants regardless of
-  // the requested `limit` so writes can invalidate them all.
   productListPattern: (categoryId: string) => `products:list:${categoryId}:1:*`,
   productListAllPattern: () => `products:list:all:1:*`,
 

@@ -194,19 +194,20 @@ export const getProduct = handle(async (call, callback) => {
 
 export const listProducts = handle(async (call, callback) => {
   const db = getDb();
-  const { category_id, pagination } = validateGrpc(
+  const { category_id, pagination, include_inactive } = validateGrpc(
     ListProductsGrpcSchema,
     call.request
   );
 
   const page = pagination?.page ?? 1;
   const limit = pagination?.limit ?? 20;
+  const includeInactive = include_inactive ?? false;
 
   // All products
   if (!category_id) {
     const cacheKey = CacheKey.productListAll(page, limit);
 
-    if (page === 1) {
+    if (page === 1 && !includeInactive) {
       const cached = await cacheGet<any>(cacheKey);
       if (cached) {
         callback(null, cached);
@@ -214,10 +215,15 @@ export const listProducts = handle(async (call, callback) => {
       }
     }
 
-    const { products, total } = await listAllProducts(db, page, limit);
+    const { products, total } = await listAllProducts(
+      db,
+      page,
+      limit,
+      includeInactive
+    );
     const response = { products, pagination: { total, page, limit } };
 
-    if (page === 1) {
+    if (page === 1 && !includeInactive) {
       await cacheSet(cacheKey, response, TTL.PRODUCT_LIST);
     }
 
@@ -227,7 +233,7 @@ export const listProducts = handle(async (call, callback) => {
 
   // product by category
   const cacheKey = CacheKey.productList(category_id, page, limit);
-  if (page === 1) {
+  if (page === 1 && !includeInactive) {
     const cached = await cacheGet<any>(cacheKey);
     if (cached) {
       callback(null, cached);
@@ -239,11 +245,12 @@ export const listProducts = handle(async (call, callback) => {
     db,
     category_id,
     page,
-    limit
+    limit,
+    includeInactive
   );
   const response = { products, pagination: { total, page, limit } };
 
-  if (page === 1) {
+  if (page === 1 && !includeInactive) {
     await cacheSet(cacheKey, response, TTL.PRODUCT_LIST);
   }
 
@@ -378,6 +385,10 @@ export function uploadProductImageHandler(call: any, callback: any): void {
       }
 
       await cacheDel(CacheKey.product(product_id));
+      await Promise.all([
+        cacheDelPattern(CacheKey.productListPattern(product.category_id)),
+        cacheDelPattern(CacheKey.productListAllPattern()),
+      ]);
 
       await writeAuditLog(getDb(), {
         entity_type: "product",

@@ -40,6 +40,9 @@ export const ListProductsSchema = z.object({
   category_id: z.uuid().optional(),
   page: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
+  // Admin-only: surfaces soft-deleted/deactivated products so they can be
+  // reactivated. Never exposed on PublicListProductsSchema.
+  include_inactive: z.coerce.boolean().optional(),
 });
 
 // Public storefront takes a category slug, not category_id — separate shape,
@@ -82,6 +85,7 @@ export const ListProductsGrpcSchema = z.object({
       limit: z.coerce.number().int().positive().max(100).optional(),
     })
     .optional(),
+  include_inactive: z.boolean().optional(),
 });
 
 export const UpdateStockSchema = z.object({

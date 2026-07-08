@@ -85,8 +85,9 @@ message GetProductRequest {
 }
 
 message ListProductsRequest {
-  optional string          category_id = 1;   // omit to list all
-  common.PaginationRequest pagination  = 2;
+  optional string          category_id      = 1;   // omit to list all
+  common.PaginationRequest pagination       = 2;
+  optional bool            include_inactive = 3;    // admin-only; public path never sets this
 }
 
 message ProductResponse {
