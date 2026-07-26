@@ -14,6 +14,7 @@ import {
   removeFromCart,
   getCart,
 } from "../handlers/cart.handlers";
+import { placeOrder, getOrder } from "../handlers/order.handlers";
 import {
   listPublicCategories,
   listPublicProducts,
@@ -39,6 +40,8 @@ export function createServer(): grpc.Server {
     UpdateCartItem: withGrpcMetrics("UpdateCartItem", updateCartItem),
     RemoveFromCart: withGrpcMetrics("RemoveFromCart", removeFromCart),
     GetCart: withGrpcMetrics("GetCart", getCart),
+    PlaceOrder: withGrpcMetrics("PlaceOrder", placeOrder),
+    GetOrder: withGrpcMetrics("GetOrder", getOrder),
     ListCategories: withGrpcMetrics("ListCategories", listPublicCategories),
     ListProducts: withGrpcMetrics("ListProducts", listPublicProducts),
     GetProduct: withGrpcMetrics("GetProduct", getPublicProduct),

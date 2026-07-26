@@ -55,3 +55,12 @@ export const RemoveCartSchema = z.object({
   customer_id: z.uuid(),
   product_id: z.uuid(),
 });
+
+export const PlaceOrderSchema = z.object({
+  customer_id: z.uuid(),
+});
+
+export const GetOrderSchema = z.object({
+  customer_id: z.uuid(),
+  order_id: z.uuid(),
+});

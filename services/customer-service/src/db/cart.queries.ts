@@ -1,4 +1,5 @@
 import type mysql from "mysql2/promise";
+import type { DbClient } from "@infrastructure/database/mysql";
 import { generateId } from "@shared/utils/uuid";
 
 export async function upsertCartItem(
@@ -65,4 +66,13 @@ export async function cartItemExists(
     [customerId, productId]
   );
   return rows.length > 0;
+}
+
+export async function clearCart(
+  db: DbClient,
+  customerId: string
+): Promise<void> {
+  await db.execute(`DELETE FROM cart_items WHERE customer_id = ?`, [
+    customerId,
+  ]);
 }

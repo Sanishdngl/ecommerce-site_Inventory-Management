@@ -18,6 +18,7 @@ import {
   getProductsByIds,
 } from "../handlers/product.handlers";
 import { bulkUploadProductsHandler } from "../handlers/bulk.handlers";
+import { reserveStockForOrder } from "../handlers/stock-reservation.handlers";
 import { getInventoryStats, healthCheck } from "../handlers/system.handlers";
 import { withGrpcMetrics } from "@infrastructure/observability/metrics";
 
@@ -38,6 +39,10 @@ export function createServer(): grpc.Server {
     GetProduct: withGrpcMetrics("GetProduct", getProduct),
     ListProducts: withGrpcMetrics("ListProducts", listProducts),
     UpdateStock: withGrpcMetrics("UpdateStock", updateStock),
+    ReserveStockForOrder: withGrpcMetrics(
+      "ReserveStockForOrder",
+      reserveStockForOrder
+    ),
     GetProductsByIds: withGrpcMetrics("GetProductsByIds", getProductsByIds),
     GetInventoryStats: withGrpcMetrics("GetInventoryStats", getInventoryStats),
 

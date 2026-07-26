@@ -93,3 +93,15 @@ export const UpdateStockSchema = z.object({
   delta: z.number().int(), // Signed — reject if result < 0; check stays in handler
   reason: z.string().max(255).optional(),
 });
+
+export const ReserveStockForOrderSchema = z.object({
+  order_id: z.uuid(),
+  lines: z
+    .array(
+      z.object({
+        product_id: z.uuid(),
+        quantity: z.number().int().positive(),
+      })
+    )
+    .min(1),
+});
