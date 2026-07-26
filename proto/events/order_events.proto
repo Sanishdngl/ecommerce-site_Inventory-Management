@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package events.order;
+
+// Schema reference only — see inventory_events.proto header for why this
+// isn't wired into proto-loader. Source of truth is
+// shared/src/types/events.ts (OrderEventPayload).
+
+message OrderLine {
+  string product_id = 1;
+  int32  quantity   = 2;
+}
+
+message OrderEvent {
+  string             event_type  = 1; // "placed" | "confirmed" | "cancelled"
+  string             order_id    = 2;
+  string             customer_id = 3;
+  string             status      = 4;
+  repeated OrderLine lines       = 5;
+  string             occurred_at = 6;
+}

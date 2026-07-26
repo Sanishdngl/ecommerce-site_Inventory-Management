@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package events.inventory;
+
+// Schema reference only — NOT loaded by shared/src/grpc/proto-loader.ts.
+// These aren't RPC messages; they document the shape of outbox_events.payload
+// (JSON) for product/stock events. Source of truth for wire format is
+// shared/src/types/events.ts (ProductEventPayload / StockEventPayload) —
+// keep both in sync if either changes.
+
+message ProductEvent {
+  string   event_type      = 1; // "created" | "updated" | "deactivated"
+  string   product_id      = 2;
+  string   category_id     = 3;
+  string   name            = 4;
+  string   description     = 5;
+  string   price           = 6;
+  bool     is_active       = 7;
+  string   thumbnail_url   = 8;
+  string   list_image_url  = 9;
+  string   occurred_at     = 10;
+}
+
+message StockEvent {
+  string   event_type       = 1; // "adjusted" | "reserved" | "reservation_failed"
+  string   product_id       = 2;
+  int32    quantity_delta   = 3;
+  int32    resulting_stock  = 4;
+  string   reason           = 5; // "manual_adjustment" | "order_reservation" | "reservation_rollback"
+  string   order_id         = 6; // set only when reason relates to an order
+  string   occurred_at      = 7;
+}
