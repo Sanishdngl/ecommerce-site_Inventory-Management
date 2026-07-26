@@ -1,4 +1,5 @@
-import { getDb } from "@infrastructure/database/mysql";
+import { getDb, withTransaction } from "@infrastructure/database/mysql";
+import { writeOutboxEvent } from "@infrastructure/database/outbox";
 import {
   cacheGet,
   cacheSet,
@@ -19,7 +20,7 @@ import {
   ListProductsGrpcSchema,
   UpdateStockSchema,
 } from "@shared/validation/inventory.schema";
-import type { Product } from "@shared/types";
+import type { Product, ImageType } from "@shared/types";
 import {
   findProductById,
   insertProduct,
@@ -37,7 +38,6 @@ import {
   extFromUrl,
   extFromMime,
 } from "../storage/rustfs";
-import { ImageType } from "@shared/types";
 
 const SERVICE_NAME = "inventory-service";
 
@@ -47,20 +47,41 @@ function getMeta(call: any, key: string): string | undefined {
 }
 
 export const createProduct = handle(async (call, callback) => {
-  const db = getDb();
   const { category_id, name, description, price, stock_quantity } =
     validateGrpc(CreateProductSchema, call.request);
 
-  const category = await findCategoryById(db, category_id);
-  if (!category) throw new NotFoundError("Category not found");
+  const product = await withTransaction(async (conn) => {
+    const category = await findCategoryById(conn, category_id);
+    if (!category) throw new NotFoundError("Category not found");
 
-  const product = await insertProduct(db, {
-    category_id,
-    name,
-    description,
-    price,
-    stock_quantity,
+    const product = await insertProduct(conn, {
+      category_id,
+      name,
+      description,
+      price,
+      stock_quantity,
+    });
+
+    await writeOutboxEvent(conn, {
+      aggregate_type: "product",
+      aggregate_id: product.id,
+      event_type: "created",
+      payload: {
+        product_id: product.id,
+        category_id,
+        name,
+        description: description ?? null,
+        price,
+        is_active: true,
+        thumbnail_url: null,
+        list_image_url: null,
+      },
+    });
+
+    return product;
   });
+
+  const db = getDb();
 
   await Promise.all([
     cacheDelPattern(CacheKey.productListPattern(category_id)),
@@ -86,27 +107,48 @@ export const createProduct = handle(async (call, callback) => {
 });
 
 export const updateProduct = handle(async (call, callback) => {
-  const db = getDb();
   const { id, category_id, name, description, price, is_active } = validateGrpc(
     UpdateProductSchema,
     call.request
   );
 
-  const existing = await findProductById(db, id);
-  if (!existing) throw new NotFoundError("Product not found");
+  const { existing, updated } = await withTransaction(async (conn) => {
+    const existing = await findProductById(conn, id);
+    if (!existing) throw new NotFoundError("Product not found");
 
-  if (category_id) {
-    const category = await findCategoryById(db, category_id);
-    if (!category) throw new NotFoundError("Category not found");
-  }
+    if (category_id) {
+      const category = await findCategoryById(conn, category_id);
+      if (!category) throw new NotFoundError("Category not found");
+    }
 
-  const updated = await updateProductQuery(db, id, {
-    category_id,
-    name,
-    description,
-    price,
-    is_active,
+    const updated = await updateProductQuery(conn, id, {
+      category_id,
+      name,
+      description,
+      price,
+      is_active,
+    });
+
+    await writeOutboxEvent(conn, {
+      aggregate_type: "product",
+      aggregate_id: id,
+      event_type: "updated",
+      payload: {
+        product_id: id,
+        category_id: updated?.category_id ?? existing.category_id,
+        name: updated?.name ?? existing.name,
+        description: updated?.description ?? existing.description ?? null,
+        price: updated?.price ?? existing.price,
+        is_active: updated?.is_active ?? existing.is_active,
+        thumbnail_url: updated?.thumbnail_url ?? null,
+        list_image_url: updated?.list_image_url ?? null,
+      },
+    });
+
+    return { existing, updated };
   });
+
+  const db = getDb();
 
   await cacheDel(CacheKey.product(id));
   await Promise.all([
@@ -142,14 +184,35 @@ export const updateProduct = handle(async (call, callback) => {
 });
 
 export const deleteProduct = handle(async (call, callback) => {
-  const db = getDb();
   const { id } = validateGrpc(DeleteProductSchema, call.request);
 
-  const existing = await findProductById(db, id);
-  if (!existing) throw new NotFoundError("Product not found");
-  if (!existing.is_active) throw new NotFoundError("Product not found");
+  const existing = await withTransaction(async (conn) => {
+    const existing = await findProductById(conn, id);
+    if (!existing) throw new NotFoundError("Product not found");
+    if (!existing.is_active) throw new NotFoundError("Product not found");
 
-  await softDeleteProduct(db, id);
+    await softDeleteProduct(conn, id);
+
+    await writeOutboxEvent(conn, {
+      aggregate_type: "product",
+      aggregate_id: id,
+      event_type: "deactivated",
+      payload: {
+        product_id: id,
+        category_id: existing.category_id,
+        name: existing.name,
+        description: existing.description ?? null,
+        price: existing.price,
+        is_active: false,
+        thumbnail_url: existing.thumbnail_url ?? null,
+        list_image_url: existing.list_image_url ?? null,
+      },
+    });
+
+    return existing;
+  });
+
+  const db = getDb();
 
   await cacheDel(CacheKey.product(id));
   await Promise.all([
@@ -258,26 +321,44 @@ export const listProducts = handle(async (call, callback) => {
 });
 
 export const updateStock = handle(async (call, callback) => {
-  const db = getDb();
   const { product_id, delta, reason } = validateGrpc(
     UpdateStockSchema,
     call.request
   );
 
-  const existing = await findProductById(db, product_id);
-  if (!existing) throw new NotFoundError("Product not found");
+  const { existing, updated } = await withTransaction(async (conn) => {
+    const existing = await findProductById(conn, product_id);
+    if (!existing) throw new NotFoundError("Product not found");
 
-  const updated = await updateStockQuantity(db, product_id, delta);
+    const updated = await updateStockQuantity(conn, product_id, delta);
 
-  if (!updated) {
-    logger.warn(SERVICE_NAME, "Stock update rejected: would go negative", {
-      product_id,
-      delta,
+    if (!updated) {
+      logger.warn(SERVICE_NAME, "Stock update rejected: would go negative", {
+        product_id,
+        delta,
+      });
+      throw new BadRequestError(
+        "Stock update rejected — quantity cannot go below zero"
+      );
+    }
+
+    await writeOutboxEvent(conn, {
+      aggregate_type: "stock",
+      aggregate_id: product_id,
+      event_type: "adjusted",
+      payload: {
+        product_id,
+        quantity_delta: delta,
+        resulting_stock: updated.stock_quantity,
+        reason: "manual_adjustment",
+        order_id: null,
+      },
     });
-    throw new BadRequestError(
-      "Stock update rejected — quantity cannot go below zero"
-    );
-  }
+
+    return { existing, updated };
+  });
+
+  const db = getDb();
 
   await cacheDel(CacheKey.stock(product_id), CacheKey.product(product_id));
   await Promise.all([

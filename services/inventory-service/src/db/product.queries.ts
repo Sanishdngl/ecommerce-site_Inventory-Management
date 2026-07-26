@@ -1,10 +1,11 @@
 import type mysql from "mysql2/promise";
+import type { DbClient } from "@infrastructure/database/mysql";
 import { generateId } from "@shared/utils/uuid";
 import { clampPagination } from "@shared/utils/pagination";
 import type { Product } from "@shared/types";
 
 export async function findProductById(
-  db: mysql.Pool,
+  db: DbClient,
   id: string
 ): Promise<Product | null> {
   const [rows] = await db.execute<any[]>(
@@ -15,7 +16,7 @@ export async function findProductById(
 }
 
 export async function insertProduct(
-  db: mysql.Pool,
+  db: DbClient,
   data: {
     category_id: string;
     name: string;
@@ -48,7 +49,7 @@ export async function insertProduct(
 }
 
 export async function updateProduct(
-  db: mysql.Pool,
+  db: DbClient,
   id: string,
   data: Partial<
     Pick<
@@ -110,7 +111,7 @@ export async function updateProduct(
 }
 
 export async function softDeleteProduct(
-  db: mysql.Pool,
+  db: DbClient,
   id: string
 ): Promise<void> {
   await db.execute(
@@ -120,7 +121,7 @@ export async function softDeleteProduct(
 }
 
 export async function listAllProducts(
-  db: mysql.Pool,
+  db: DbClient,
   page: number,
   limit: number,
   includeInactive = false
@@ -143,7 +144,7 @@ export async function listAllProducts(
 }
 
 export async function listProductsByCategory(
-  db: mysql.Pool,
+  db: DbClient,
   categoryId: string,
   page: number,
   limit: number,
@@ -170,7 +171,7 @@ export async function listProductsByCategory(
 }
 
 export async function updateStockQuantity(
-  db: mysql.Pool,
+  db: DbClient,
   productId: string,
   delta: number
 ): Promise<Product | null> {
@@ -187,7 +188,7 @@ export async function updateStockQuantity(
   return findProductById(db, productId);
 }
 
-export async function countActiveProducts(db: mysql.Pool): Promise<number> {
+export async function countActiveProducts(db: DbClient): Promise<number> {
   const [[{ total }]] = await db.execute<any[]>(
     `SELECT COUNT(*) as total FROM products WHERE is_active = true`
   );
@@ -195,7 +196,7 @@ export async function countActiveProducts(db: mysql.Pool): Promise<number> {
 }
 
 export async function countLowStockProducts(
-  db: mysql.Pool,
+  db: DbClient,
   threshold: number
 ): Promise<number> {
   const [[{ total }]] = await db.execute<any[]>(
@@ -207,7 +208,7 @@ export async function countLowStockProducts(
 }
 
 export async function findProductsByIds(
-  db: mysql.Pool,
+  db: DbClient,
   ids: string[]
 ): Promise<Product[]> {
   if (ids.length === 0) return [];
