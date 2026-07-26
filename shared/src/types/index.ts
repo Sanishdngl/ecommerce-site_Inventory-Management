@@ -68,6 +68,28 @@ export interface EnrichedCartItem {
   stock_quantity: number;
 }
 
+export type OrderStatus = "pending" | "confirmed" | "cancelled";
+
+export interface Order {
+  id: string;
+  customer_id: string;
+  status: OrderStatus;
+  total_amount: string;
+  cancellation_reason: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface OrderItemRow {
+  id: string;
+  order_id: string;
+  product_id: string;
+  product_name: string;
+  price: string;
+  quantity: number;
+  created_at: Date;
+}
+
 export interface AuditLog {
   id: string;
   entity_type: AuditEntityType;

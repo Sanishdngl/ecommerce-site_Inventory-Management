@@ -1,0 +1,41 @@
+{
+  "name": "ecommerce-outbox-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+    "database.hostname": "mysql",
+    "database.port": "3306",
+    "database.user": "${DB_USER}",
+    "database.password": "${DB_PASSWORD}",
+    "database.server.id": "1001",
+    "topic.prefix": "ecommerce",
+
+    "database.include.list": "ecommerce",
+    "table.include.list": "ecommerce.outbox_events",
+
+    "tombstones.on.delete": "false",
+
+    "transforms": "outbox",
+    "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+
+    "transforms.outbox.table.field.event.id": "id",
+    "transforms.outbox.table.field.event.key": "aggregate_id",
+    "transforms.outbox.table.field.event.timestamp": "created_at",
+    "transforms.outbox.table.field.event.payload": "payload",
+
+    "transforms.outbox.route.by.field": "aggregate_type",
+    "transforms.outbox.route.topic.replacement": "inventory.${routedByValue}.events",
+
+    "transforms.outbox.table.fields.additional.placement": "event_type:header:eventType",
+
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false"
+  },
+  "_notes": [
+    "route.topic.replacement produces 'inventory.product.events' and 'inventory.stock.events' from aggregate_type values 'product'/'stock', matching the design doc's topic names.",
+    "aggregate_type='order' routes to 'inventory.order.events' by this same template — override with a second connector or a ScriptedRouter if 'customer.order.events' naming is required verbatim; not done here to keep one connector for the single shared outbox table.",
+    "SMT property names are for Debezium 2.7's outbox EventRouter as documented at build time — verify against the exact installed connector version before registering (POST this file to http://localhost:8083/connectors), since these have changed across Debezium major versions.",
+    "DB_USER / DB_PASSWORD are substituted from the same .env values used by mysql/services — Kafka Connect needs its own env passthrough or a configured ConfigProvider if not run via docker-compose env_file."
+  ]
+}

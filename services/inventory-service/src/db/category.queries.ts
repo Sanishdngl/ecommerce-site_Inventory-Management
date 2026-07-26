@@ -1,9 +1,9 @@
-import type mysql from "mysql2/promise";
+import type { DbClient } from "@infrastructure/database/mysql";
 import { generateId } from "@shared/utils/uuid";
 import type { Category } from "@shared/types";
 
 export async function findCategoryById(
-  db: mysql.Pool,
+  db: DbClient,
   id: string
 ): Promise<Category | null> {
   const [rows] = await db.execute<any[]>(
@@ -14,7 +14,7 @@ export async function findCategoryById(
 }
 
 export async function findCategoryBySlug(
-  db: mysql.Pool,
+  db: DbClient,
   slug: string
 ): Promise<Category | null> {
   const [rows] = await db.execute<any[]>(
@@ -25,7 +25,7 @@ export async function findCategoryBySlug(
 }
 
 export async function insertCategory(
-  db: mysql.Pool,
+  db: DbClient,
   name: string,
   slug: string
 ): Promise<Category> {
@@ -41,7 +41,7 @@ export async function insertCategory(
   return findCategoryById(db, id) as Promise<Category>;
 }
 
-export async function getAllCategories(db: mysql.Pool): Promise<Category[]> {
+export async function getAllCategories(db: DbClient): Promise<Category[]> {
   const [rows] = await db.execute<any[]>(
     `SELECT * FROM categories ORDER BY name ASC`
   );
@@ -49,7 +49,7 @@ export async function getAllCategories(db: mysql.Pool): Promise<Category[]> {
 }
 
 export async function updateCategory(
-  db: mysql.Pool,
+  db: DbClient,
   id: string,
   data: Partial<Pick<Category, "name" | "slug">>
 ): Promise<Category | null> {
@@ -83,11 +83,11 @@ export async function updateCategory(
 // ON DELETE RESTRICT, so MySQL rejects this (errno 1451 / ER_ROW_IS_REFERENCED_2)
 // if any product still points at the category. The handler translates that
 // into a ConflictError rather than a raw 500.
-export async function deleteCategory(db: mysql.Pool, id: string): Promise<void> {
+export async function deleteCategory(db: DbClient, id: string): Promise<void> {
   await db.execute(`DELETE FROM categories WHERE id = ?`, [id]);
 }
 
-export async function countCategories(db: mysql.Pool): Promise<number> {
+export async function countCategories(db: DbClient): Promise<number> {
   const [[{ total }]] = await db.execute<any[]>(
     `SELECT COUNT(*) as total FROM categories`
   );
