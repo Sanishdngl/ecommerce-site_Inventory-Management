@@ -90,6 +90,38 @@ message CartResponse {
   repeated CartItem items = 1;
 }
 
+// Orders
+
+message OrderItem {
+  string product_id   = 1;
+  string product_name = 2;   // snapshot at order time
+  string price        = 3;   // snapshot at order time; string, matches inventory price format
+  int32  quantity     = 4;
+}
+
+message Order {
+  string             id                  = 1;
+  string             customer_id         = 2;
+  string             status              = 3;   // "pending" | "confirmed" | "cancelled"
+  repeated OrderItem items               = 4;
+  string             total_amount        = 5;
+  optional string    cancellation_reason = 6;
+  string             created_at          = 7;
+}
+
+message PlaceOrderRequest {
+  string customer_id = 1;   // order is built from the customer's current cart; cart is cleared on success
+}
+
+message GetOrderRequest {
+  string customer_id = 1;
+  string order_id    = 2;
+}
+
+message OrderResponse {
+  Order order = 1;
+}
+
 message RefreshCustomerRequest {
   string refresh_token = 1;
 }
@@ -119,6 +151,9 @@ service CustomerService {
   rpc UpdateCartItem  (CartItemRequest)       returns (CartResponse);
   rpc RemoveFromCart  (RemoveCartRequest)     returns (CartResponse);
   rpc GetCart         (GetCartRequest)        returns (CartResponse);
+
+  rpc PlaceOrder      (PlaceOrderRequest)     returns (OrderResponse);
+  rpc GetOrder        (GetOrderRequest)       returns (OrderResponse);
 
   rpc GetProduct     (inventory.GetProductRequest)     returns (inventory.ProductResponse);
   rpc ListProducts   (inventory.ListProductsRequest)   returns (inventory.ProductListResponse);
